@@ -22,6 +22,8 @@ https://<projet>.vercel.app
 Le frontend et l’API partagent la même origine. Les cookies de session
 restent donc `SameSite=Lax`, sans CORS ni cookie tiers.
 
+Prérequis : Python 3.14 (ou 3.12+) et Node.js 22.22+ (exigé par React Router 8).
+
 ## Structure
 
 ```text
@@ -105,6 +107,10 @@ URL TLS `rediss://`.
 Les variables `VERCEL_URL` et `VERCEL_PROJECT_PRODUCTION_URL` sont fournies
 automatiquement par Vercel et ajoutées aux hôtes et origines CSRF par
 `backend/nteri_api/settings.py`.
+
+Ne définissez pas `VITE_API_URL` ni `VITE_WS_URL` en production : le frontend
+utilise les chemins relatifs et `window.location.origin`, donc la même origine
+que l’API.
 
 **Ne définissez pas `NTERI_DEMO_PASSWORD` en production.** La commande
 `seed_demo` est réservée au développement local.
