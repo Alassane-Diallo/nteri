@@ -133,6 +133,19 @@ VERCEL_HOSTS = [
     if host.strip()
 ]
 
+# Alias stables du projet. Vercel ne les expose pas toujours au runtime des
+# services ; on les ajoute explicitement pour que l'alias court et l'URL de
+# déploiement répondent tous les deux (sans wildcard sur *.vercel.app).
+VERCEL_PROJECT_HOSTS = (
+    "nteri.vercel.app",
+    "nteri-alassane-diallos-projects-6b5efa42.vercel.app",
+)
+
+if not DEBUG:
+    for host in VERCEL_PROJECT_HOSTS:
+        if host not in VERCEL_HOSTS:
+            VERCEL_HOSTS.append(host)
+
 for host in VERCEL_HOSTS:
     if host not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(host)

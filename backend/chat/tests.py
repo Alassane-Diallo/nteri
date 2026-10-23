@@ -261,6 +261,36 @@ class ChatApiTests(APITestCase):
             1,
         )
 
+    def test_direct_conversation_can_be_created_from_api(self):
+        response = self.client.post(
+            "/api/conversations/",
+            {"kind": "direct", "memberIds": [str(self.moussa.pk)]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], str(self.conversation.pk))
+
+        response = self.client.post(
+            "/api/conversations/",
+            {"kind": "direct", "memberIds": [str(self.fatoumata.pk)]},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["kind"], "direct")
+        self.assertEqual(response.data["memberCount"], 2)
+        created = Conversation.objects.get(pk=response.data["id"])
+        self.assertEqual(created.participants.count(), 2)
+
+        invalid = self.client.post(
+            "/api/conversations/",
+            {
+                "kind": "direct",
+                "memberIds": [str(self.moussa.pk), str(self.fatoumata.pk)],
+            },
+            format="json",
+        )
+        self.assertEqual(invalid.status_code, 400)
+
     def test_group_requires_name_and_two_other_members(self):
         payload = {
             "kind": "group",

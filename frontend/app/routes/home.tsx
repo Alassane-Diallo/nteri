@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BrandMark } from "~/components/BrandMark";
 import { LoaderIcon, XIcon } from "~/components/icons";
 import { AuthScreen } from "~/features/auth/AuthScreen";
+import { CreateDiscussionDialog } from "~/features/messaging/components/CreateDiscussionDialog";
 import { CreateGroupDialog } from "~/features/messaging/components/CreateGroupDialog";
 import { Conversation } from "~/features/messaging/components/Conversation";
 import { Sidebar } from "~/features/messaging/components/Sidebar";
@@ -50,6 +51,7 @@ function LoadingScreen() {
 
 export default function Home() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [isDiscussionDialogOpen, setIsDiscussionDialogOpen] = useState(false);
   const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
 
   const {
@@ -67,6 +69,7 @@ export default function Home() {
     logout,
     loadMessages,
     sendMessage,
+    createDirect,
     createGroup,
     markRead,
     clearError,
@@ -128,6 +131,21 @@ export default function Home() {
     void loadMessages(chatId);
   };
 
+  const handleCreateDiscussion = async (
+    contactId: string,
+  ): Promise<boolean> => {
+    const chatId = await createDirect(contactId);
+
+    if (!chatId) {
+      return false;
+    }
+
+    setIsDiscussionDialogOpen(false);
+    openChat(chatId);
+
+    return true;
+  };
+
   const handleCreateGroup = async (
     name: string,
     memberIds: string[],
@@ -175,6 +193,7 @@ export default function Home() {
               socketStatus={socketStatus}
               busy={busy}
               onSelectChat={openChat}
+              onCreateDiscussion={() => setIsDiscussionDialogOpen(true)}
               onCreateGroup={() => setIsGroupDialogOpen(true)}
               onLogout={() => void logout()}
               className={activeChat ? "hidden md:flex" : "flex"}
@@ -199,6 +218,7 @@ export default function Home() {
                 />
               ) : (
                 <WelcomePanel
+                  onCreateDiscussion={() => setIsDiscussionDialogOpen(true)}
                   onCreateGroup={() => setIsGroupDialogOpen(true)}
                 />
               )}
@@ -206,6 +226,14 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      <CreateDiscussionDialog
+        open={isDiscussionDialogOpen}
+        contacts={contacts}
+        currentUserId={currentUserId}
+        onClose={() => setIsDiscussionDialogOpen(false)}
+        onCreate={handleCreateDiscussion}
+      />
 
       <CreateGroupDialog
         open={isGroupDialogOpen}

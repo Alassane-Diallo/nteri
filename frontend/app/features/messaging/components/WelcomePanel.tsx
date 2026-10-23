@@ -1,11 +1,15 @@
 import { BrandMark } from "~/components/BrandMark";
-import { LockIcon, PlusIcon } from "~/components/icons";
+import { LockIcon, MessageIcon, PlusIcon } from "~/components/icons";
 
 interface WelcomePanelProps {
+  onCreateDiscussion: () => void;
   onCreateGroup: () => void;
 }
 
-export function WelcomePanel({ onCreateGroup }: WelcomePanelProps) {
+export function WelcomePanel({
+  onCreateDiscussion,
+  onCreateGroup,
+}: WelcomePanelProps) {
   return (
     <section
       aria-label="Bienvenue sur N’Teri"
@@ -36,18 +40,28 @@ export function WelcomePanel({ onCreateGroup }: WelcomePanelProps) {
         </h1>
 
         <p className="mt-4 max-w-md text-[13.5px] leading-relaxed text-ink-soft">
-          Retrouvez vos proches, envoyez un message et créez vos groupes. Vos
+          Retrouvez vos proches, lancez une discussion et créez vos groupes. Vos
           conversations sont synchronisées et protégées.
         </p>
 
-        <button
-          type="button"
-          onClick={onCreateGroup}
-          className="button-brand mt-7 inline-flex h-12 items-center gap-2 rounded-full px-5 text-[13px] font-semibold shadow-sm transition duration-200 hover:brightness-110 active:scale-[0.98]"
-        >
-          <PlusIcon className="size-4" />
-          Créer un groupe
-        </button>
+        <div className="mt-7 flex w-full max-w-sm flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center">
+          <button
+            type="button"
+            onClick={onCreateDiscussion}
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-line bg-surface px-5 text-[13px] font-semibold text-ink shadow-sm transition duration-200 hover:bg-surface-muted active:scale-[0.98]"
+          >
+            <MessageIcon className="size-4" />
+            Nouvelle discussion
+          </button>
+          <button
+            type="button"
+            onClick={onCreateGroup}
+            className="button-brand inline-flex h-12 items-center justify-center gap-2 rounded-full px-5 text-[13px] font-semibold shadow-sm transition duration-200 hover:brightness-110 active:scale-[0.98]"
+          >
+            <PlusIcon className="size-4" />
+            Créer un groupe
+          </button>
+        </div>
 
         <div className="mt-8 inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1.5 text-[10px] font-medium text-muted">
           <LockIcon className="size-3.5" />

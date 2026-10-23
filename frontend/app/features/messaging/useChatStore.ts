@@ -346,6 +346,36 @@ export function useChatStore(activeChatId: string | null) {
     [handleFailure],
   );
 
+  const createDirect = useCallback(
+    async (contactId: string): Promise<string | null> => {
+      if (!contactId) {
+        setError("Sélectionnez une personne pour démarrer la discussion.");
+
+        return null;
+      }
+
+      setError(null);
+      try {
+        const conversation = await chatApi.createDirect(contactId);
+        const chat = toChat(conversation);
+        setChats((current) => mergeChats(current, [chat]));
+        if (conversation.lastMessage) {
+          setMessages((current) =>
+            mergeMessages(current, [toMessage(conversation.lastMessage!)]),
+          );
+        }
+        setUnreadByChat((current) => ({ ...current, [chat.id]: 0 }));
+
+        return chat.id;
+      } catch (failure) {
+        setError(handleFailure(failure));
+
+        return null;
+      }
+    },
+    [handleFailure],
+  );
+
   const createGroup = useCallback(
     async (input: NewGroupInput): Promise<string | null> => {
       const name = input.name.trim();
@@ -409,6 +439,7 @@ export function useChatStore(activeChatId: string | null) {
     logout,
     loadMessages,
     sendMessage,
+    createDirect,
     createGroup,
     markRead,
     clearError,

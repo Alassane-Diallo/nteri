@@ -339,6 +339,13 @@ export const chatApi = {
     );
   },
 
+  async createDirect(contactId: string): Promise<ApiConversation> {
+    return request<ApiConversation>("/api/conversations/", {
+      method: "POST",
+      body: { kind: "direct", memberIds: [contactId] },
+    });
+  },
+
   async createGroup(name: string, memberIds: string[]): Promise<ApiConversation> {
     return request<ApiConversation>("/api/conversations/", {
       method: "POST",

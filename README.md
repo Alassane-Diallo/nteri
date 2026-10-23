@@ -95,7 +95,7 @@ URL TLS `rediss://`.
 | --- | --- |
 | `DJANGO_SECRET_KEY` | clé aléatoire d’au moins 64 caractères |
 | `DJANGO_DEBUG` | `False` |
-| `DJANGO_ALLOWED_HOSTS` | `nteri.vercel.app` (ou le domaine généré) |
+| `DJANGO_ALLOWED_HOSTS` | `nteri.vercel.app` (les alias stables du projet sont ajoutés par `settings.py`) |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | `https://nteri.vercel.app` |
 | `DJANGO_TRUST_PROXY_HEADERS` | `True` |
 | `DATABASE_URL` | URL PostgreSQL Supabase (pooler, port 6543) |
@@ -104,9 +104,11 @@ URL TLS `rediss://`.
 | `DB_CONN_MAX_AGE` | `0` (automatique pour un pooler) |
 | `PYTHON_VERSION` | `3.14` |
 
-Les variables `VERCEL_URL` et `VERCEL_PROJECT_PRODUCTION_URL` sont fournies
-automatiquement par Vercel et ajoutées aux hôtes et origines CSRF par
-`backend/nteri_api/settings.py`.
+Les alias stables `nteri.vercel.app` et
+`nteri-alassane-diallos-projects-6b5efa42.vercel.app` sont ajoutés
+automatiquement aux hôtes et origines CSRF par `backend/nteri_api/settings.py`.
+Les variables `VERCEL_URL` et `VERCEL_PROJECT_PRODUCTION_URL`, lorsqu’elles
+sont fournies par Vercel, le sont aussi.
 
 Ne définissez pas `VITE_API_URL` ni `VITE_WS_URL` en production : le frontend
 utilise les chemins relatifs et `window.location.origin`, donc la même origine

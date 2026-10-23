@@ -1,12 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Avatar } from "~/components/Avatar";
 import { BrandMark } from "~/components/BrandMark";
 import { IconButton } from "~/components/IconButton";
 import {
   LogOutIcon,
+  MessageIcon,
   PlusIcon,
   SearchIcon,
+  UsersIcon,
   XIcon,
 } from "~/components/icons";
 import { normalizeText } from "~/lib/identity";
@@ -24,6 +26,7 @@ interface SidebarProps {
   socketStatus: SocketState;
   busy: boolean;
   onSelectChat: (chatId: string) => void;
+  onCreateDiscussion: () => void;
   onCreateGroup: () => void;
   onLogout: () => void;
   className?: string;
@@ -53,13 +56,41 @@ export function Sidebar({
   socketStatus,
   busy,
   onSelectChat,
+  onCreateDiscussion,
   onCreateGroup,
   onLogout,
   className,
 }: SidebarProps) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<ChatFilter>("all");
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const newMenuRef = useRef<HTMLDivElement>(null);
   const normalizedQuery = normalizeText(query);
+
+  useEffect(() => {
+    if (!newMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!newMenuRef.current?.contains(event.target as Node)) {
+        setNewMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setNewMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [newMenuOpen]);
 
   const visibleChats = useMemo(
     () =>
@@ -101,14 +132,76 @@ export function Sidebar({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onCreateGroup}
-            className="button-brand inline-flex h-11 shrink-0 items-center gap-2 rounded-full px-3.5 text-[12px] font-semibold shadow-sm transition duration-200 hover:brightness-110 active:scale-[0.97]"
-          >
-            <PlusIcon className="size-4" />
-            Groupe
-          </button>
+          <div ref={newMenuRef} className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setNewMenuOpen((open) => !open)}
+              aria-haspopup="menu"
+              aria-expanded={newMenuOpen}
+              className="button-brand inline-flex h-11 shrink-0 items-center gap-2 rounded-full px-3.5 text-[12px] font-semibold shadow-sm transition duration-200 hover:brightness-110 active:scale-[0.97]"
+            >
+              <PlusIcon className="size-4" />
+              Nouveau
+            </button>
+
+            {newMenuOpen && (
+              <div
+                role="menu"
+                aria-label="Créer une conversation"
+                className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-64 overflow-hidden rounded-2xl border border-line bg-surface p-1.5 shadow-pop"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setNewMenuOpen(false);
+                    onCreateDiscussion();
+                  }}
+                  className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                >
+                  <span
+                    className="grid size-9 shrink-0 place-items-center rounded-full bg-tone-green text-tone-green-ink"
+                    aria-hidden="true"
+                  >
+                    <MessageIcon className="size-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[12px] font-semibold text-ink">
+                      Nouvelle discussion
+                    </span>
+                    <span className="mt-0.5 block text-[10px] text-muted">
+                      Avec une personne
+                    </span>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setNewMenuOpen(false);
+                    onCreateGroup();
+                  }}
+                  className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-colors hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                >
+                  <span
+                    className="grid size-9 shrink-0 place-items-center rounded-full bg-tone-yellow text-tone-yellow-ink"
+                    aria-hidden="true"
+                  >
+                    <UsersIcon className="size-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[12px] font-semibold text-ink">
+                      Nouveau groupe
+                    </span>
+                    <span className="mt-0.5 block text-[10px] text-muted">
+                      Avec plusieurs personnes
+                    </span>
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="mt-5 flex h-12 items-center gap-2 rounded-2xl border border-line bg-surface-muted px-3 transition focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/15">
