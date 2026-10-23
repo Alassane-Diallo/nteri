@@ -1,0 +1,20 @@
+# Dépendances et artefacts de build
+node_modules/
+build/
+.react-router/
+.vercel/
+
+# Secrets et configuration locale
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.sqlite3
+backend/staticfiles/
+
+# Système
+.DS_Store

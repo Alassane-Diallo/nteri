@@ -1,0 +1,289 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-display: "Sora", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --color-canvas: #f4f0e7;
+  --color-surface: #fffefa;
+  --color-surface-muted: #faf7ef;
+  --color-surface-raised: #ffffff;
+  --color-ink: #12211a;
+  --color-ink-soft: #49584f;
+  --color-muted: #67746c;
+  --color-line: #e7e2d5;
+  --color-line-strong: #d6d0bf;
+
+  --color-brand: #0b7a45;
+  --color-brand-deep: #075c35;
+  --color-brand-soft: #e6f3ea;
+  --color-brand-ink: #05422a;
+
+  --color-mali-green: #009639;
+  --color-mali-yellow: #fcd116;
+  --color-mali-red: #ce1126;
+
+  --color-tone-green: #dff0e5;
+  --color-tone-green-ink: #0a5c37;
+  --color-tone-yellow: #fbefb9;
+  --color-tone-yellow-ink: #755600;
+  --color-tone-red: #f8dfe2;
+  --color-tone-red-ink: #9b1c2c;
+  --color-tone-clay: #f2e5d8;
+  --color-tone-clay-ink: #7c4a24;
+  --color-tone-river: #dfeaf2;
+  --color-tone-river-ink: #1f5876;
+
+  --color-selection: #eef6f0;
+  --color-action: #0b7a45;
+  --color-action-deep: #075c35;
+  --color-action-ink: #f7fff9;
+  --color-bubble-own: #0b6b3f;
+  --color-bubble-own-deep: #095a35;
+  --color-bubble-own-ink: #f7fff9;
+  --color-danger: #ce1126;
+  --color-danger-soft: #fbe7e9;
+  --color-logo: #0e2c1d;
+
+  --shadow-frame: 0 30px 90px -40px rgb(18 33 26 / 0.4),
+    0 2px 10px rgb(18 33 26 / 0.06);
+  --shadow-pop: 0 30px 80px -28px rgb(18 33 26 / 0.45);
+  --shadow-bubble: 0 1px 1px rgb(18 33 26 / 0.06);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-canvas: #0b120e;
+    --color-surface: #101a14;
+    --color-surface-muted: #142019;
+    --color-surface-raised: #17251c;
+    --color-ink: #f1f5ed;
+    --color-ink-soft: #bcc8be;
+    --color-muted: #94a399;
+    --color-line: #223129;
+    --color-line-strong: #2d4034;
+
+    --color-brand: #58c98b;
+    --color-brand-deep: #7edca7;
+    --color-brand-soft: #153524;
+    --color-brand-ink: #c5f7d9;
+
+    --color-tone-green: #173a27;
+    --color-tone-green-ink: #8fe3b0;
+    --color-tone-yellow: #3b3214;
+    --color-tone-yellow-ink: #f2d574;
+    --color-tone-red: #3a1a1f;
+    --color-tone-red-ink: #f5a1ab;
+    --color-tone-clay: #372619;
+    --color-tone-clay-ink: #e8b98e;
+    --color-tone-river: #172b38;
+    --color-tone-river-ink: #9cc8e3;
+
+    --color-selection: #16271d;
+    --color-action: #54cf91;
+    --color-action-deep: #38b879;
+    --color-action-ink: #052315;
+    --color-bubble-own: #1e6a46;
+    --color-bubble-own-deep: #18583a;
+    --color-bubble-own-ink: #f8fffa;
+    --color-danger: #ff8a95;
+    --color-danger-soft: #3a1a1f;
+    --color-logo: #173d29;
+
+    --shadow-frame: 0 30px 90px -40px rgb(0 0 0 / 0.75),
+      0 2px 10px rgb(0 0 0 / 0.3);
+    --shadow-pop: 0 30px 80px -28px rgb(0 0 0 / 0.8);
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light dark;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans antialiased;
+  }
+
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-brand) 22%, transparent);
+    color: var(--color-ink);
+  }
+
+  :where(button, a, input, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+
+  dialog {
+    color: var(--color-ink);
+  }
+
+  .nteri-dialog::backdrop {
+    background: color-mix(in srgb, var(--color-ink) 42%, transparent);
+    backdrop-filter: blur(5px);
+  }
+}
+
+@layer components {
+  .mali-gradient {
+    background-image: linear-gradient(
+      105deg,
+      #0b7a45 0%,
+      #159150 18%,
+      #7bb02e 38%,
+      #fcd116 58%,
+      #e5a400 72%,
+      #ce1126 100%
+    );
+  }
+
+  .button-brand {
+    background-image: linear-gradient(
+      135deg,
+      var(--color-action) 0%,
+      var(--color-action-deep) 100%
+    );
+    color: var(--color-action-ink);
+  }
+
+  .bubble-own {
+    background-image: linear-gradient(
+      140deg,
+      var(--color-bubble-own) 0%,
+      var(--color-bubble-own-deep) 100%
+    );
+    color: var(--color-bubble-own-ink);
+  }
+
+  .page-pattern {
+    background-color: var(--color-canvas);
+    background-image: radial-gradient(
+        ellipse at 0% 0%,
+        color-mix(in srgb, var(--color-mali-green) 13%, transparent),
+        transparent 40%
+      ),
+      radial-gradient(
+        ellipse at 100% 8%,
+        color-mix(in srgb, var(--color-mali-yellow) 14%, transparent),
+        transparent 34%
+      ),
+      radial-gradient(
+        ellipse at 72% 100%,
+        color-mix(in srgb, var(--color-mali-red) 9%, transparent),
+        transparent 36%
+      );
+  }
+
+  .chat-pattern {
+    background-color: var(--color-surface-muted);
+    background-image: radial-gradient(
+        circle at 1px 1px,
+        color-mix(in srgb, var(--color-ink) 6%, transparent) 1px,
+        transparent 0
+      ),
+      radial-gradient(
+        ellipse at 12% 6%,
+        color-mix(in srgb, var(--color-mali-green) 8%, transparent),
+        transparent 42%
+      ),
+      radial-gradient(
+        ellipse at 92% 92%,
+        color-mix(in srgb, var(--color-mali-yellow) 9%, transparent),
+        transparent 44%
+      );
+    background-size: 22px 22px, 100% 100%, 100% 100%;
+  }
+
+  .scrollbar-slim {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+    background-color: var(--color-line-strong);
+  }
+
+  .scrollbar-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .message-in {
+    animation: message-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .fade-up {
+    animation: fade-up 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .dialog-in[open] {
+    animation: dialog-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .composer-safe {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
