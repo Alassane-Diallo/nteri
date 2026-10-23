@@ -153,6 +153,8 @@ Variables à définir dans Vercel :
   `DJANGO_CSRF_TRUSTED_ORIGINS`, `DJANGO_TRUST_PROXY_HEADERS=True` ;
 - `DATABASE_URL` (PostgreSQL Supabase, pooler port `6543`) et `REDIS_URL`
   (Upstash, `rediss://`) ;
+- `DATABASE_MIGRATION_URL` optionnel : URL Supabase non poolée (port `5432`)
+  utilisée uniquement par `migrate` au build ;
 - `DB_CONN_MAX_AGE=0` recommandé pour les fonctions serverless.
 
 Avec l’intégration Supabase de Vercel, `DATABASE_POSTGRES_URL` ou

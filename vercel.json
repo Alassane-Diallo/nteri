@@ -7,7 +7,7 @@
     "backend": {
       "root": "backend/",
       "entrypoint": "nteri_api.asgi:application",
-      "buildCommand": "python manage.py collectstatic --noinput && python manage.py migrate --noinput"
+      "buildCommand": "python manage.py collectstatic --noinput && DATABASE_URL=\"${DATABASE_MIGRATION_URL:-$DATABASE_URL}\" python manage.py migrate --noinput"
     }
   },
   "rewrites": [

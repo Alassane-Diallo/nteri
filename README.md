@@ -77,7 +77,10 @@ aussi les paramètres `supa` et `pgbouncer` ajoutés par Supabase.
 Pour Supabase, utilisez de préférence l’URL du **pooler transaction** (port
 `6543`) pour l’application. Le code détecte `pooler.supabase.com` et adapte
 Django : `DB_CONN_MAX_AGE=0` par défaut, `DISABLE_SERVER_SIDE_CURSORS=True` et
-désactivation des requêtes préparées de psycopg 3.
+désactivation des requêtes préparées de psycopg 3. En option, définissez
+`DATABASE_MIGRATION_URL` avec l’URL Supabase **non poolée** (port `5432`) :
+le build l’utilise uniquement pour `migrate`, tandis que l’application continue
+d’utiliser l’URL poolée.
 
 Redis reste obligatoire en production : il permet aux messages diffusés par
 une instance Vercel d’atteindre les WebSockets connectés à une autre instance.
@@ -94,6 +97,7 @@ URL TLS `rediss://`.
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | `https://nteri.vercel.app` |
 | `DJANGO_TRUST_PROXY_HEADERS` | `True` |
 | `DATABASE_URL` | URL PostgreSQL Supabase (pooler, port 6543) |
+| `DATABASE_MIGRATION_URL` | Optionnel : URL Supabase non poolée pour `migrate` |
 | `REDIS_URL` | URL Upstash Redis TLS (`rediss://`) |
 | `DB_CONN_MAX_AGE` | `0` (automatique pour un pooler) |
 | `PYTHON_VERSION` | `3.14` |
