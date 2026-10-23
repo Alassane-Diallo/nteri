@@ -126,6 +126,8 @@ service frontend exécute `npm run build`.
 ## Sécurité
 
 - `DJANGO_DEBUG=False`, clé secrète unique, hôtes et origines explicites.
+- Hors développement, le backend refuse de démarrer sans PostgreSQL et Redis,
+  et refuse explicitement SQLite.
 - Cookies `Secure`, `HttpOnly`, `SameSite=Lax`.
 - CSRF obligatoire sur toutes les écritures.
 - WebSocket authentifié par la session et validé par origine.

@@ -39,6 +39,17 @@ if not SECRET_KEY:
         "générez une clé avec : python -c \"import secrets; print(secrets.token_urlsafe(64))\""
     )
 
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+
+if not DEBUG:
+    if not DATABASE_URL or DATABASE_URL.startswith("sqlite"):
+        raise RuntimeError(
+            "DATABASE_URL PostgreSQL est obligatoire hors développement."
+        )
+    if not REDIS_URL:
+        raise RuntimeError("REDIS_URL est obligatoire hors développement.")
+
 ALLOWED_HOSTS = env_list(
     "DJANGO_ALLOWED_HOSTS",
     "localhost,127.0.0.1,[::1]",
@@ -152,8 +163,6 @@ DATABASES = {
 # serveur. Cette option n'affecte que les itérateurs explicites.
 if "-pooler" in os.getenv("DATABASE_URL", ""):
     DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
-
-REDIS_URL = os.getenv("REDIS_URL", "").strip()
 
 if REDIS_URL:
     CACHES = {
