@@ -144,12 +144,22 @@ python manage.py collectstatic --noinput
 python manage.py migrate --noinput
 ```
 
+WhiteNoise sert ensuite `/static/` (admin inclus) depuis l’application ASGI :
+aucun serveur web séparé n’est nécessaire sur Vercel.
+
 Variables à définir dans Vercel :
 
 - `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=False`, `DJANGO_ALLOWED_HOSTS`,
   `DJANGO_CSRF_TRUSTED_ORIGINS`, `DJANGO_TRUST_PROXY_HEADERS=True` ;
-- `DATABASE_URL` (PostgreSQL) et `REDIS_URL` (`rediss://`) ;
+- `DATABASE_URL` (PostgreSQL Supabase, pooler port `6543`) et `REDIS_URL`
+  (Upstash, `rediss://`) ;
 - `DB_CONN_MAX_AGE=0` recommandé pour les fonctions serverless.
+
+Avec l’intégration Supabase de Vercel, `DATABASE_POSTGRES_URL` ou
+`POSTGRES_URL` sont détectés automatiquement hors DEBUG si `DATABASE_URL` est
+absent. Les paramètres Supabase `supa` et `pgbouncer` sont retirés avant la
+connexion, et le pooler désactive les curseurs côté serveur ainsi que les
+requêtes préparées de psycopg 3.
 
 `VERCEL_URL` et `VERCEL_PROJECT_PRODUCTION_URL` sont ajoutés automatiquement
 aux hôtes et origines CSRF. Ne pas lancer `seed_demo` en production.

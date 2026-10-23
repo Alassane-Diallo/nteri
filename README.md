@@ -66,11 +66,23 @@ Le proxy Vite envoie `/api` et `/ws` vers `http://127.0.0.1:8000`.
 
 ### 1. Créer les ressources
 
-- **PostgreSQL** (Neon ou Supabase) → `DATABASE_URL`
+- **PostgreSQL** (Supabase ou Neon) → `DATABASE_URL`
 - **Redis** (Upstash) → `REDIS_URL` en `rediss://`
 
-Redis est obligatoire en production : il permet aux messages diffusés par une
-instance Vercel d’atteindre les WebSockets connectés à une autre instance.
+Avec l’intégration Supabase de Vercel, les variables peuvent s’appeler
+`DATABASE_POSTGRES_URL` ou `POSTGRES_URL`. Le backend les détecte
+automatiquement hors développement si `DATABASE_URL` est absent. Il nettoie
+aussi les paramètres `supa` et `pgbouncer` ajoutés par Supabase.
+
+Pour Supabase, utilisez de préférence l’URL du **pooler transaction** (port
+`6543`) pour l’application. Le code détecte `pooler.supabase.com` et adapte
+Django : `DB_CONN_MAX_AGE=0` par défaut, `DISABLE_SERVER_SIDE_CURSORS=True` et
+désactivation des requêtes préparées de psycopg 3.
+
+Redis reste obligatoire en production : il permet aux messages diffusés par
+une instance Vercel d’atteindre les WebSockets connectés à une autre instance.
+Supabase ne fournit pas ce service ; créez une base Upstash et utilisez son
+URL TLS `rediss://`.
 
 ### 2. Variables d’environnement Vercel
 
@@ -81,9 +93,9 @@ instance Vercel d’atteindre les WebSockets connectés à une autre instance.
 | `DJANGO_ALLOWED_HOSTS` | `nteri.vercel.app` (ou le domaine généré) |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | `https://nteri.vercel.app` |
 | `DJANGO_TRUST_PROXY_HEADERS` | `True` |
-| `DATABASE_URL` | URL PostgreSQL poolée |
-| `REDIS_URL` | URL Redis TLS |
-| `DB_CONN_MAX_AGE` | `0` recommandé sur Vercel |
+| `DATABASE_URL` | URL PostgreSQL Supabase (pooler, port 6543) |
+| `REDIS_URL` | URL Upstash Redis TLS (`rediss://`) |
+| `DB_CONN_MAX_AGE` | `0` (automatique pour un pooler) |
 | `PYTHON_VERSION` | `3.14` |
 
 Les variables `VERCEL_URL` et `VERCEL_PROJECT_PRODUCTION_URL` sont fournies
@@ -103,8 +115,12 @@ automatiquement par Vercel et ajoutées aux hôtes et origines CSRF par
 5. Ajouter les variables d’environnement avant le premier déploiement.
 6. Déployer.
 
-Le build du service backend exécute `collectstatic` puis `migrate`. Le
-service frontend exécute `npm run build`.
+Le build du service backend exécute `collectstatic` puis `migrate`. WhiteNoise
+sert ensuite `/static/` (admin inclus) depuis l’application ASGI. Le service
+frontend exécute `npm run build`.
+
+Si Supabase est hébergé en `eu-west-3`, choisissez la région Vercel `cdg1`
+(Paris) dans **Settings → Functions → Region** pour limiter la latence.
 
 ### 4. Vérifier
 

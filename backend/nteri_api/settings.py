@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import dj_database_url
 from dotenv import load_dotenv
@@ -30,6 +31,30 @@ def env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def clean_database_url(value: str) -> str:
+    """Nettoie une URL copiée depuis Vercel ou Supabase.
+
+    Les intégrations Vercel entourent parfois les valeurs de guillemets et
+    ajoutent des paramètres destinés à Prisma ou à Supavisor. Psycopg ne
+    comprend ni ``pgbouncer`` ni ``supa``, on les retire avant de configurer
+    Django.
+    """
+    value = value.strip().strip('"').strip("'")
+    if not value:
+        return ""
+
+    parts = urlsplit(value)
+    query = [
+        (key, item)
+        for key, item in parse_qsl(parts.query, keep_blank_values=True)
+        if key not in {"pgbouncer", "supa"}
+    ]
+
+    return urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+    )
+
+
 DEBUG = env_bool("DJANGO_DEBUG", False)
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
@@ -39,16 +64,55 @@ if not SECRET_KEY:
         "générez une clé avec : python -c \"import secrets; print(secrets.token_urlsafe(64))\""
     )
 
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-REDIS_URL = os.getenv("REDIS_URL", "").strip()
+# Supabase/Vercel peut fournir DATABASE_POSTGRES_URL (parfois préfixé) au lieu
+# de DATABASE_URL. En développement, seules les variables explicites sont
+# utilisées pour éviter de toucher accidentellement à la base de production.
+_database_candidates = [os.getenv("DATABASE_URL", "")]
+if not DEBUG:
+    _database_candidates.extend(
+        [
+            os.getenv("DATABASE_POSTGRES_URL", ""),
+            os.getenv("DATABASE_POSTGRES_PRISMA_URL", ""),
+            os.getenv("DATABASE_POSTGRES_URL_NON_POOLING", ""),
+            os.getenv("POSTGRES_URL", ""),
+        ]
+    )
+
+DATABASE_URL = ""
+for value in _database_candidates:
+    candidate = clean_database_url(value)
+    if candidate:
+        DATABASE_URL = candidate
+        break
+
+_redis_candidates = [os.getenv("REDIS_URL", "")]
+if not DEBUG:
+    _redis_candidates.append(os.getenv("KV_URL", ""))
+
+REDIS_URL = ""
+for value in _redis_candidates:
+    candidate = value.strip().strip('"').strip("'")
+    if candidate:
+        REDIS_URL = candidate
+        break
 
 if not DEBUG:
-    if not DATABASE_URL or DATABASE_URL.startswith("sqlite"):
+    if not DATABASE_URL.startswith(("postgres://", "postgresql://")):
         raise RuntimeError(
-            "DATABASE_URL PostgreSQL est obligatoire hors développement."
+            "DATABASE_URL (ou DATABASE_POSTGRES_URL fourni par Supabase) "
+            "doit être une URL PostgreSQL hors développement."
         )
+    if "sslmode=disable" in DATABASE_URL:
+        raise RuntimeError("sslmode=disable est interdit hors développement.")
     if not REDIS_URL:
-        raise RuntimeError("REDIS_URL est obligatoire hors développement.")
+        raise RuntimeError(
+            "REDIS_URL est obligatoire hors développement "
+            "(Upstash Redis, URL rediss://)."
+        )
+    if not REDIS_URL.startswith("rediss://"):
+        raise RuntimeError(
+            "REDIS_URL doit utiliser TLS (rediss://) hors développement."
+        )
 
 ALLOWED_HOSTS = env_list(
     "DJANGO_ALLOWED_HOSTS",
@@ -121,6 +185,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -151,18 +216,39 @@ TEMPLATES = [
 WSGI_APPLICATION = "nteri_api.wsgi.application"
 ASGI_APPLICATION = "nteri_api.asgi.application"
 
-DATABASES = {
-    "default": dj_database_url.config(
-        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
-        conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "60")),
-        conn_health_checks=True,
-    )
-}
+DATABASE_IS_POOLED = (
+    ".pooler." in DATABASE_URL
+    or "-pooler" in DATABASE_URL
+    or ":6543" in DATABASE_URL
+)
 
-# Neon (et PgBouncer en mode transaction) ne supporte pas les curseurs côté
-# serveur. Cette option n'affecte que les itérateurs explicites.
-if "-pooler" in os.getenv("DATABASE_URL", ""):
+if DATABASE_URL:
+    DATABASES = {
+        "default": dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=int(
+                os.getenv(
+                    "DB_CONN_MAX_AGE",
+                    "0" if DATABASE_IS_POOLED else "60",
+                )
+            ),
+            conn_health_checks=True,
+        )
+    }
+else:
+    DATABASES = {
+        "default": dj_database_url.config(
+            default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+            conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "60")),
+            conn_health_checks=True,
+        )
+    }
+
+# PgBouncer/Supavisor en mode transaction (Supabase pooler, Neon) ne supporte
+# pas les curseurs côté serveur ni les requêtes préparées entre transactions.
+if DATABASE_IS_POOLED:
     DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
+    DATABASES["default"].setdefault("OPTIONS", {})["prepare_threshold"] = None
 
 if REDIS_URL:
     CACHES = {
@@ -217,6 +303,17 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# WhiteNoise sert les fichiers statiques (admin inclus) depuis l'application
+# ASGI sur Vercel, où aucun serveur web séparé ne les expose.
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
