@@ -70,9 +70,9 @@ Le proxy Vite envoie `/api` et `/ws` vers `http://127.0.0.1:8000`.
 - **Redis** (Upstash) → `REDIS_URL` en `rediss://`
 
 Avec l’intégration Supabase de Vercel, les variables peuvent s’appeler
-`DATABASE_POSTGRES_URL` ou `POSTGRES_URL`. Le backend les détecte
-automatiquement hors développement si `DATABASE_URL` est absent. Il nettoie
-aussi les paramètres `supa` et `pgbouncer` ajoutés par Supabase.
+`DATABASE_POSTGRES_URL`, `POSTGRES_URL`, `POSTGRES_PRISMA_URL`, etc. Le backend
+les détecte automatiquement hors développement si `DATABASE_URL` est absent.
+Il nettoie aussi les paramètres `supa` et `pgbouncer` ajoutés par Supabase.
 
 Pour Supabase, utilisez de préférence l’URL du **pooler transaction** (port
 `6543`) pour l’application. Le code détecte `pooler.supabase.com` et adapte

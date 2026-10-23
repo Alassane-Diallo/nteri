@@ -157,11 +157,12 @@ Variables à définir dans Vercel :
   utilisée uniquement par `migrate` au build ;
 - `DB_CONN_MAX_AGE=0` recommandé pour les fonctions serverless.
 
-Avec l’intégration Supabase de Vercel, `DATABASE_POSTGRES_URL` ou
-`POSTGRES_URL` sont détectés automatiquement hors DEBUG si `DATABASE_URL` est
-absent. Les paramètres Supabase `supa` et `pgbouncer` sont retirés avant la
-connexion, et le pooler désactive les curseurs côté serveur ainsi que les
-requêtes préparées de psycopg 3.
+Avec l’intégration Supabase de Vercel, `DATABASE_POSTGRES_URL`, `POSTGRES_URL`,
+`POSTGRES_PRISMA_URL` et les variantes non poolées sont détectés
+automatiquement hors DEBUG si `DATABASE_URL` est absent. Les paramètres
+Supabase `supa` et `pgbouncer` sont retirés avant la connexion, et le pooler
+désactive les curseurs côté serveur ainsi que les requêtes préparées de
+psycopg 3.
 
 `VERCEL_URL` et `VERCEL_PROJECT_PRODUCTION_URL` sont ajoutés automatiquement
 aux hôtes et origines CSRF. Ne pas lancer `seed_demo` en production.

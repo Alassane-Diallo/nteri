@@ -72,9 +72,11 @@ if not DEBUG:
     _database_candidates.extend(
         [
             os.getenv("DATABASE_POSTGRES_URL", ""),
-            os.getenv("DATABASE_POSTGRES_PRISMA_URL", ""),
-            os.getenv("DATABASE_POSTGRES_URL_NON_POOLING", ""),
             os.getenv("POSTGRES_URL", ""),
+            os.getenv("DATABASE_POSTGRES_PRISMA_URL", ""),
+            os.getenv("POSTGRES_PRISMA_URL", ""),
+            os.getenv("DATABASE_POSTGRES_URL_NON_POOLING", ""),
+            os.getenv("POSTGRES_URL_NON_POOLING", ""),
         ]
     )
 
