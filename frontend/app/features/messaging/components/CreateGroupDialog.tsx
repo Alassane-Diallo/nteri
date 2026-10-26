@@ -287,10 +287,14 @@ export function CreateGroupDialog({
             <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
               <SearchIcon className="size-5 text-muted" />
               <p className="mt-3 text-[12.5px] font-semibold text-ink">
-                Aucun membre trouvé
+                {availableContacts.length === 0
+                  ? "Votre carnet est vide"
+                  : "Aucun membre trouvé"}
               </p>
-              <p className="mt-1 text-[10.5px] text-muted">
-                Essayez un autre nom.
+              <p className="mt-1 max-w-xs text-[10.5px] leading-relaxed text-muted">
+                {availableContacts.length === 0
+                  ? "Ajoutez d’abord au moins deux contacts depuis votre carnet pour créer un groupe."
+                  : "Essayez un autre nom ou numéro."}
               </p>
             </div>
           )}

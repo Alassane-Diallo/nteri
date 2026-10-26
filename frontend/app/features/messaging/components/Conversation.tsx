@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+
 import type { Chat, Contact, Message } from "../types";
 import { ChatHeader } from "./ChatHeader";
 import { Composer } from "./Composer";
@@ -27,6 +29,14 @@ export function Conversation({
     chat.kind === "group"
       ? "Écrire dans le groupe…"
       : `Écrire à ${firstName ?? "ce contact"}…`;
+  const visibleContacts = useMemo(() => {
+    const byId = new Map(contacts.map((item) => [item.id, item]));
+    for (const member of chat.members) {
+      byId.set(member.id, member);
+    }
+
+    return Array.from(byId.values());
+  }, [chat.members, contacts]);
 
   return (
     <section
@@ -36,14 +46,14 @@ export function Conversation({
       <ChatHeader
         chat={chat}
         contact={contact}
-        contacts={contacts}
+        contacts={visibleContacts}
         currentUserId={currentUserId}
         onBack={onBack}
       />
       <MessageList
         chat={chat}
         messages={messages}
-        contacts={contacts}
+        contacts={visibleContacts}
         currentUserId={currentUserId}
       />
       <Composer placeholder={placeholder} onSend={onSend} />

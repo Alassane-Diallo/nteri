@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.contrib.auth.models import AbstractUser
 from django.db import models
-from django.db.models import Q
+from django.db.models import F, Q
 from django.utils import timezone
 
 
@@ -26,6 +26,98 @@ class User(AbstractUser):
 
     def __str__(self) -> str:
         return self.username
+
+
+class Contact(models.Model):
+    """Contact privé enregistré par un utilisateur.
+
+    Chaque carnet est personnel : deux personnes peuvent se contacter sans
+    partager ni exposer le reste de leur carnet d'adresses.
+    """
+
+    owner = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="contact_links",
+    )
+    contact = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="contacted_by_links",
+    )
+    alias = models.CharField(max_length=150, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["owner", "contact"],
+                name="unique_owner_contact",
+            ),
+            models.CheckConstraint(
+                condition=~Q(owner=F("contact")),
+                name="contact_cannot_be_self",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["owner", "created_at"],
+                name="contact_owner_idx",
+            ),
+        ]
+
+    @property
+    def display_name(self) -> str:
+        return self.alias.strip() or self.contact.display_name
+
+    def __str__(self) -> str:
+        return f"{self.owner.username} → {self.contact.username}"
+
+
+class PushSubscription(models.Model):
+    """Abonnement Web Push d'un navigateur pour un utilisateur."""
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="push_subscriptions",
+    )
+    endpoint = models.URLField(max_length=500, unique=True)
+    p256dh = models.CharField(max_length=200)
+    auth = models.CharField(max_length=100)
+    user_agent = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user"], name="push_user_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Push {self.user.username} ({self.endpoint[:48]}…)"
+
+
+class OtpChallenge(models.Model):
+    """Code OTP à usage unique, stocké uniquement sous forme hachée."""
+
+    phone = models.CharField(max_length=24, db_index=True)
+    code_hash = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    attempts = models.PositiveSmallIntegerField(default=0)
+    consumed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["phone", "-created_at"],
+                name="otp_phone_created_idx",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"OTP {self.phone} ({'consommé' if self.consumed_at else 'actif'})"
 
 
 class Conversation(models.Model):

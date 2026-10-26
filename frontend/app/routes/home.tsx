@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { BrandMark } from "~/components/BrandMark";
 import { LoaderIcon, XIcon } from "~/components/icons";
 import { AuthScreen } from "~/features/auth/AuthScreen";
-import { CreateDiscussionDialog } from "~/features/messaging/components/CreateDiscussionDialog";
+import { ContactsDialog } from "~/features/messaging/components/ContactsDialog";
 import { CreateGroupDialog } from "~/features/messaging/components/CreateGroupDialog";
 import { Conversation } from "~/features/messaging/components/Conversation";
 import { Sidebar } from "~/features/messaging/components/Sidebar";
@@ -19,7 +19,7 @@ import type { Route } from "./+types/home";
 
 export function meta({}: Route.MetaArgs) {
   return [
-    { title: "N’Teri — Messagerie malienne" },
+    { title: "N’Teri - Messagerie malienne" },
     {
       name: "description",
       content:
@@ -51,8 +51,9 @@ function LoadingScreen() {
 
 export default function Home() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
-  const [isDiscussionDialogOpen, setIsDiscussionDialogOpen] = useState(false);
   const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
+  const [isContactsDialogOpen, setIsContactsDialogOpen] = useState(false);
+  const [needsName, setNeedsName] = useState(false);
 
   const {
     status,
@@ -62,15 +63,19 @@ export default function Home() {
     messages,
     unreadByChat,
     socketStatus,
+    notifications,
     busy,
     error,
-    login,
-    register,
+    requestOtp,
+    verifyOtp,
     logout,
     loadMessages,
     sendMessage,
-    createDirect,
     createGroup,
+    addContact,
+    removeContact,
+    startDirectChat,
+    enableNotifications,
     markRead,
     clearError,
   } = useChatStore(activeChatId);
@@ -95,12 +100,23 @@ export default function Home() {
     () => messagesForChat(messages, activeChatId),
     [messages, activeChatId],
   );
-  const activeContact =
+  const activeContactId =
     activeChat?.kind === "direct"
-      ? contacts.find(
-          (contact) => contact.id === directContactId(activeChat, currentUserId),
-        )
+      ? directContactId(activeChat, currentUserId)
       : undefined;
+  const activeContact = activeContactId
+    ? (contacts.find((contact) => contact.id === activeContactId) ??
+      activeChat?.members.find((member) => member.id === activeContactId))
+    : undefined;
+
+  const openChat = useCallback(
+    (chatId: string) => {
+      setActiveChatId(chatId);
+      markRead(chatId);
+      void loadMessages(chatId);
+    },
+    [loadMessages, markRead],
+  );
 
   useEffect(() => {
     if (!activeChatId) {
@@ -109,6 +125,76 @@ export default function Home() {
 
     markRead(activeChatId);
   }, [activeChatId, activeMessages.length, markRead]);
+
+  useEffect(() => {
+    if (status === "anonymous") {
+      setNeedsName(false);
+    }
+  }, [status]);
+
+  useEffect(() => {
+    const openKnownChat = (chatId?: string) => {
+      if (chatId && chats.some((chat) => chat.id === chatId)) {
+        openChat(chatId);
+      }
+    };
+
+    const handleOpenChat = (event: Event) => {
+      const detail = (event as CustomEvent<{ chatId?: string }>).detail;
+      openKnownChat(detail?.chatId);
+    };
+
+    const handleWorkerMessage = (event: MessageEvent) => {
+      const data: unknown = event.data;
+      if (
+        typeof data === "object" &&
+        data !== null &&
+        "type" in data &&
+        (data as { type?: unknown }).type === "nteri:open-chat" &&
+        "chatId" in data
+      ) {
+        openKnownChat((data as { chatId?: string }).chatId);
+      }
+    };
+
+    window.addEventListener("nteri:open-chat", handleOpenChat);
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.addEventListener("message", handleWorkerMessage);
+    }
+
+    return () => {
+      window.removeEventListener("nteri:open-chat", handleOpenChat);
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.removeEventListener(
+          "message",
+          handleWorkerMessage,
+        );
+      }
+    };
+  }, [chats, openChat]);
+
+  useEffect(() => {
+    if (status !== "authenticated" || chats.length === 0) {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const target = params.get("chat");
+    if (!target) {
+      return;
+    }
+
+    params.delete("chat");
+    const query = params.toString();
+    window.history.replaceState(
+      {},
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+    );
+    if (chats.some((chat) => chat.id === target)) {
+      openChat(target);
+    }
+  }, [chats, openChat, status]);
 
   if (status === "loading") {
     return <LoadingScreen />;
@@ -119,32 +205,23 @@ export default function Home() {
       <AuthScreen
         busy={busy}
         error={error}
-        onLogin={login}
-        onRegister={register}
+        needsName={needsName}
+        onRequestOtp={async (phone) => {
+          setNeedsName(false);
+
+          return requestOtp(phone);
+        }}
+        onVerifyOtp={async (payload) => {
+          const result = await verifyOtp(payload);
+          if (result === "requires-name") {
+            setNeedsName(true);
+          }
+
+          return result;
+        }}
       />
     );
   }
-
-  const openChat = (chatId: string) => {
-    setActiveChatId(chatId);
-    markRead(chatId);
-    void loadMessages(chatId);
-  };
-
-  const handleCreateDiscussion = async (
-    contactId: string,
-  ): Promise<boolean> => {
-    const chatId = await createDirect(contactId);
-
-    if (!chatId) {
-      return false;
-    }
-
-    setIsDiscussionDialogOpen(false);
-    openChat(chatId);
-
-    return true;
-  };
 
   const handleCreateGroup = async (
     name: string,
@@ -157,6 +234,18 @@ export default function Home() {
     }
 
     setIsGroupDialogOpen(false);
+    openChat(chatId);
+
+    return true;
+  };
+
+  const handleStartDirectChat = async (contactId: string): Promise<boolean> => {
+    const chatId = await startDirectChat(contactId);
+    if (!chatId) {
+      return false;
+    }
+
+    setIsContactsDialogOpen(false);
     openChat(chatId);
 
     return true;
@@ -191,10 +280,12 @@ export default function Home() {
               currentUser={currentUser}
               activeChatId={activeChatId}
               socketStatus={socketStatus}
+              notifications={notifications}
               busy={busy}
               onSelectChat={openChat}
-              onCreateDiscussion={() => setIsDiscussionDialogOpen(true)}
               onCreateGroup={() => setIsGroupDialogOpen(true)}
+              onOpenContacts={() => setIsContactsDialogOpen(true)}
+              onEnableNotifications={() => void enableNotifications()}
               onLogout={() => void logout()}
               className={activeChat ? "hidden md:flex" : "flex"}
             />
@@ -218,8 +309,8 @@ export default function Home() {
                 />
               ) : (
                 <WelcomePanel
-                  onCreateDiscussion={() => setIsDiscussionDialogOpen(true)}
                   onCreateGroup={() => setIsGroupDialogOpen(true)}
+                  onOpenContacts={() => setIsContactsDialogOpen(true)}
                 />
               )}
             </main>
@@ -227,20 +318,21 @@ export default function Home() {
         </div>
       </div>
 
-      <CreateDiscussionDialog
-        open={isDiscussionDialogOpen}
-        contacts={contacts}
-        currentUserId={currentUserId}
-        onClose={() => setIsDiscussionDialogOpen(false)}
-        onCreate={handleCreateDiscussion}
-      />
-
       <CreateGroupDialog
         open={isGroupDialogOpen}
         contacts={contacts}
         currentUserId={currentUserId}
         onClose={() => setIsGroupDialogOpen(false)}
         onCreate={handleCreateGroup}
+      />
+
+      <ContactsDialog
+        open={isContactsDialogOpen}
+        contacts={contacts}
+        onClose={() => setIsContactsDialogOpen(false)}
+        onAdd={addContact}
+        onRemove={removeContact}
+        onStartChat={handleStartDirectChat}
       />
     </div>
   );

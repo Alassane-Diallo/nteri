@@ -1,18 +1,30 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { BrandMark } from "~/components/BrandMark";
-import { CheckIcon, LoaderIcon, LockIcon, UsersIcon } from "~/components/icons";
+import {
+  CheckIcon,
+  KeyIcon,
+  LoaderIcon,
+  LockIcon,
+  PhoneIcon,
+  UsersIcon,
+} from "~/components/icons";
 import { cn } from "~/lib/cn";
-import type { LoginPayload, RegisterPayload } from "../messaging/api";
+import type {
+  OtpRequestResponse,
+  OtpVerifyPayload,
+} from "../messaging/api";
 
-type Mode = "login" | "register";
+type Step = "phone" | "code";
+type VerifyResult = "authenticated" | "requires-name" | "error";
 
 interface AuthScreenProps {
   busy: boolean;
   error: string | null;
-  onLogin: (payload: LoginPayload) => Promise<boolean>;
-  onRegister: (payload: RegisterPayload) => Promise<boolean>;
+  needsName: boolean;
+  onRequestOtp: (phone: string) => Promise<OtpRequestResponse | null>;
+  onVerifyOtp: (payload: OtpVerifyPayload) => Promise<VerifyResult>;
 }
 
 const fieldClass =
@@ -20,71 +32,88 @@ const fieldClass =
 
 const labelClass = "block text-[11px] font-semibold text-ink-soft";
 
+function validPhone(value: string): boolean {
+  const digits = value.replace(/\D/g, "");
+
+  return digits.length >= 8 && digits.length <= 15;
+}
+
 export function AuthScreen({
   busy,
   error,
-  onLogin,
-  onRegister,
+  needsName,
+  onRequestOtp,
+  onVerifyOtp,
 }: AuthScreenProps) {
-  const [mode, setMode] = useState<Mode>("login");
+  const [step, setStep] = useState<Step>("phone");
   const [localError, setLocalError] = useState<string | null>(null);
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [devCode, setDevCode] = useState<string | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(0);
 
-  const switchMode = (nextMode: Mode) => {
-    setMode(nextMode);
-    setLocalError(null);
-  };
-
-  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setLocalError(null);
-
-    if (!username.trim() || !password) {
-      setLocalError("Renseignez votre nom d’utilisateur et votre mot de passe.");
+  useEffect(() => {
+    if (step !== "code" || secondsLeft <= 0) {
       return;
     }
 
-    await onLogin({ username: username.trim(), password });
-  };
+    const timer = window.setTimeout(
+      () => setSecondsLeft((current) => Math.max(0, current - 1)),
+      1000,
+    );
 
-  const handleRegister = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+    return () => window.clearTimeout(timer);
+  }, [secondsLeft, step]);
+
+  const requestCode = async (): Promise<void> => {
     setLocalError(null);
-
-    if (name.trim().length < 2) {
-      setLocalError("Indiquez votre nom complet.");
-      return;
-    }
-    if (username.trim().length < 3) {
-      setLocalError("Choisissez un nom d’utilisateur d’au moins 3 caractères.");
-      return;
-    }
-    if (phone.trim().replace(/\D/g, "").length < 8) {
+    if (!validPhone(phone)) {
       setLocalError("Indiquez un numéro de téléphone valide.");
       return;
     }
-    if (password.length < 10) {
-      setLocalError("Le mot de passe doit contenir au moins 10 caractères.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setLocalError("Les deux mots de passe ne correspondent pas.");
+
+    const response = await onRequestOtp(phone.trim());
+    if (!response) {
       return;
     }
 
-    await onRegister({
-      username: username.trim(),
-      name: name.trim(),
+    setStep("code");
+    setCode("");
+    setName("");
+    setDevCode(response.devCode ?? null);
+    setSecondsLeft(response.expiresIn);
+  };
+
+  const handlePhoneSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await requestCode();
+  };
+
+  const handleCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setLocalError(null);
+
+    if (!/^\d{6}$/.test(code)) {
+      setLocalError("Saisissez les 6 chiffres du code reçu.");
+      return;
+    }
+    if (needsName && name.trim().length < 2) {
+      setLocalError("Indiquez votre nom complet pour créer votre compte.");
+      return;
+    }
+
+    await onVerifyOtp({
       phone: phone.trim(),
-      password,
+      code,
+      ...(name.trim() ? { name: name.trim() } : {}),
     });
   };
 
   const displayedError = localError ?? error;
+  const expired = step === "code" && secondsLeft === 0;
+  const minutes = Math.floor(secondsLeft / 60);
+  const seconds = String(secondsLeft % 60).padStart(2, "0");
 
   return (
     <main className="page-pattern grid min-h-dvh place-items-center px-4 py-8 text-ink sm:px-6">
@@ -110,33 +139,34 @@ export function AuthScreen({
             </div>
 
             <h1 className="mt-14 font-display text-[38px] font-semibold leading-[1.05] tracking-[-0.05em]">
-              La conversation,
+              Vos contacts.
               <br />
-              simplement.
+              Votre conversation.
             </h1>
             <p className="mt-4 max-w-sm text-[13.5px] leading-relaxed text-canvas/70">
-              Retrouvez vos proches, échangez en temps réel et organisez vos
-              groupes dans un espace privé.
+              Connectez-vous avec votre numéro de téléphone. Votre carnet de
+              contacts reste privé, même lorsque vous discutez avec plusieurs
+              personnes.
             </p>
 
             <ul className="mt-9 space-y-3.5 text-[12.5px] text-canvas/80">
               <li className="flex items-center gap-3">
                 <span className="grid size-8 place-items-center rounded-full bg-canvas/10">
-                  <LockIcon className="size-4" />
+                  <PhoneIcon className="size-4" />
                 </span>
-                Session protégée par cookie sécurisé
+                Connexion par téléphone et code SMS
               </li>
               <li className="flex items-center gap-3">
                 <span className="grid size-8 place-items-center rounded-full bg-canvas/10">
                   <UsersIcon className="size-4" />
                 </span>
-                Conversations privées et groupes
+                Un carnet de contacts personnel
               </li>
               <li className="flex items-center gap-3">
                 <span className="grid size-8 place-items-center rounded-full bg-canvas/10">
                   <CheckIcon className="size-4" />
                 </span>
-                Messages synchronisés en temps réel
+                Messages et groupes synchronisés
               </li>
             </ul>
           </div>
@@ -165,39 +195,34 @@ export function AuthScreen({
             </div>
           </div>
 
-          <div
-            role="tablist"
-            aria-label="Connexion ou création de compte"
-            className="flex items-center gap-1 rounded-2xl bg-surface-muted p-1"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "login"}
-              onClick={() => switchMode("login")}
+          <div className="flex items-center gap-2">
+            <span
               className={cn(
-                "h-9 flex-1 rounded-xl text-[11.5px] font-semibold transition-all duration-200",
-                mode === "login"
-                  ? "bg-surface text-ink shadow-sm"
-                  : "text-muted hover:text-ink",
+                "grid size-7 place-items-center rounded-full text-[11px] font-bold",
+                step === "phone"
+                  ? "bg-brand text-surface"
+                  : "bg-brand-soft text-brand",
               )}
             >
-              Se connecter
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "register"}
-              onClick={() => switchMode("register")}
+              {step === "phone" ? "1" : <CheckIcon className="size-3.5" />}
+            </span>
+            <span
               className={cn(
-                "h-9 flex-1 rounded-xl text-[11.5px] font-semibold transition-all duration-200",
-                mode === "register"
-                  ? "bg-surface text-ink shadow-sm"
-                  : "text-muted hover:text-ink",
+                "h-px flex-1",
+                step === "code" ? "bg-brand/40" : "bg-line",
+              )}
+              aria-hidden="true"
+            />
+            <span
+              className={cn(
+                "grid size-7 place-items-center rounded-full text-[11px] font-bold",
+                step === "code"
+                  ? "bg-brand text-surface"
+                  : "bg-surface-muted text-muted",
               )}
             >
-              Créer un compte
-            </button>
+              2
+            </span>
           </div>
 
           <div className="mt-7">
@@ -205,12 +230,14 @@ export function AuthScreen({
               N’Teri · Accès
             </p>
             <h2 className="mt-1 font-display text-[25px] font-semibold tracking-[-0.04em] text-ink">
-              {mode === "login" ? "Bon retour parmi nous" : "Bienvenue sur N’Teri"}
+              {step === "phone"
+                ? "Connexion par téléphone"
+                : "Vérifiez votre numéro"}
             </h2>
             <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted">
-              {mode === "login"
-                ? "Connectez-vous pour retrouver vos conversations."
-                : "Quelques informations suffisent pour ouvrir votre espace."}
+              {step === "phone"
+                ? "Entrez votre numéro. Nous vous envoyons un code à usage unique par SMS."
+                : `Saisissez le code envoyé au ${phone.trim()}.`}
             </p>
           </div>
 
@@ -223,41 +250,27 @@ export function AuthScreen({
             </div>
           )}
 
-          {mode === "login" ? (
-            <form className="mt-5 space-y-4" onSubmit={handleLogin} noValidate>
+          {step === "phone" ? (
+            <form className="mt-5 space-y-4" onSubmit={handlePhoneSubmit} noValidate>
               <div>
-                <label htmlFor="login-username" className={labelClass}>
-                  Nom d’utilisateur
+                <label htmlFor="login-phone" className={labelClass}>
+                  Numéro de téléphone
                 </label>
                 <input
-                  id="login-username"
-                  name="username"
-                  type="text"
-                  autoComplete="username"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  placeholder="Ex. awa"
+                  id="login-phone"
+                  name="phone"
+                  type="tel"
+                  autoComplete="tel"
+                  inputMode="tel"
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  placeholder="+223 76 12 34 56"
                   className={fieldClass}
                   autoFocus
                 />
-              </div>
-
-              <div>
-                <label htmlFor="login-password" className={labelClass}>
-                  Mot de passe
-                </label>
-                <input
-                  id="login-password"
-                  name="password"
-                  type="password"
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Votre mot de passe"
-                  className={fieldClass}
-                />
+                <p className="mt-1.5 text-[10px] leading-relaxed text-muted">
+                  Utilisez le numéro associé à votre compte N’Teri.
+                </p>
               </div>
 
               <button
@@ -265,118 +278,120 @@ export function AuthScreen({
                 disabled={busy}
                 className="button-brand mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-[12.5px] font-semibold shadow-sm transition duration-200 hover:brightness-110 active:scale-[0.99] disabled:bg-line disabled:bg-none disabled:text-muted disabled:shadow-none"
               >
-                {busy && <LoaderIcon className="size-4 animate-spin" />}
-                {busy ? "Connexion…" : "Se connecter"}
+                {busy ? (
+                  <LoaderIcon className="size-4 animate-spin" />
+                ) : (
+                  <PhoneIcon className="size-4" />
+                )}
+                {busy ? "Envoi…" : "Recevoir mon code"}
               </button>
             </form>
           ) : (
-            <form className="mt-5 space-y-3.5" onSubmit={handleRegister} noValidate>
+            <form className="mt-5 space-y-4" onSubmit={handleCodeSubmit} noValidate>
               <div>
-                <label htmlFor="register-name" className={labelClass}>
-                  Nom complet
-                </label>
+                <div className="flex items-center justify-between gap-3">
+                  <label htmlFor="login-code" className={labelClass}>
+                    Code à 6 chiffres
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep("phone");
+                      setCode("");
+                      setName("");
+                      setLocalError(null);
+                    }}
+                    className="text-[10.5px] font-semibold text-brand transition hover:text-brand-deep hover:underline"
+                  >
+                    Modifier le numéro
+                  </button>
+                </div>
                 <input
-                  id="register-name"
-                  name="name"
+                  id="login-code"
+                  name="code"
                   type="text"
-                  autoComplete="name"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  placeholder="Ex. Awa Traoré"
-                  className={fieldClass}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  value={code}
+                  onChange={(event) =>
+                    setCode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  placeholder="123456"
+                  className={cn(fieldClass, "tracking-[0.35em]")}
                   autoFocus
                 />
+                <p className="mt-1.5 flex items-center gap-1.5 text-[10px] text-muted">
+                  <KeyIcon className="size-3.5" />
+                  {expired
+                    ? "Le code a expiré. Demandez-en un nouveau."
+                    : `Code valable encore ${minutes}:${seconds}.`}
+                </p>
               </div>
 
-              <div className="grid gap-3.5 sm:grid-cols-2">
+              {needsName && (
                 <div>
-                  <label htmlFor="register-username" className={labelClass}>
-                    Nom d’utilisateur
+                  <label htmlFor="login-name" className={labelClass}>
+                    Votre nom complet
                   </label>
                   <input
-                    id="register-username"
-                    name="username"
+                    id="login-name"
+                    name="name"
                     type="text"
-                    autoComplete="username"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                    value={username}
-                    onChange={(event) => setUsername(event.target.value)}
-                    placeholder="Ex. awa"
+                    autoComplete="name"
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="Ex. Awa Traoré"
                     className={fieldClass}
+                    autoFocus
                   />
+                  <p className="mt-1.5 text-[10px] leading-relaxed text-muted">
+                    Ce numéro n’a pas encore de compte. Votre nom servira à
+                    créer votre profil N’Teri.
+                  </p>
                 </div>
-                <div>
-                  <label htmlFor="register-phone" className={labelClass}>
-                    Téléphone
-                  </label>
-                  <input
-                    id="register-phone"
-                    name="phone"
-                    type="tel"
-                    autoComplete="tel"
-                    inputMode="tel"
-                    value={phone}
-                    onChange={(event) => setPhone(event.target.value)}
-                    placeholder="+223 76 12 34 56"
-                    className={fieldClass}
-                  />
-                </div>
+              )}
+
+              {devCode && (
+                <p className="rounded-2xl border border-brand/20 bg-brand-soft px-3.5 py-2.5 text-[10.5px] leading-relaxed text-brand-ink">
+                  Mode développement : votre code est{" "}
+                  <span className="font-bold tracking-[0.18em]">{devCode}</span>
+                </p>
+              )}
+
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => void requestCode()}
+                  disabled={busy}
+                  className="inline-flex h-11 flex-1 items-center justify-center rounded-full border border-line bg-surface px-4 text-[12px] font-semibold text-ink-soft transition hover:bg-surface-muted hover:text-ink disabled:text-muted"
+                >
+                  Renvoyer le code
+                </button>
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="button-brand inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-full px-5 text-[12.5px] font-semibold shadow-sm transition duration-200 hover:brightness-110 active:scale-[0.99] disabled:bg-line disabled:bg-none disabled:text-muted disabled:shadow-none"
+                >
+                  {busy && <LoaderIcon className="size-4 animate-spin" />}
+                  {busy ? "Vérification…" : "Vérifier et continuer"}
+                </button>
               </div>
-
-              <div className="grid gap-3.5 sm:grid-cols-2">
-                <div>
-                  <label htmlFor="register-password" className={labelClass}>
-                    Mot de passe
-                  </label>
-                  <input
-                    id="register-password"
-                    name="password"
-                    type="password"
-                    autoComplete="new-password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder="10 caractères minimum"
-                    className={fieldClass}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="register-confirm" className={labelClass}>
-                    Confirmation
-                  </label>
-                  <input
-                    id="register-confirm"
-                    name="confirmPassword"
-                    type="password"
-                    autoComplete="new-password"
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    placeholder="Répétez le mot de passe"
-                    className={fieldClass}
-                  />
-                </div>
-              </div>
-
-              <p className="text-[10px] leading-relaxed text-muted">
-                Le nom d’utilisateur accepte les lettres minuscules, chiffres,
-                points, tirets et soulignés (3 à 30 caractères).
-              </p>
-
-              <button
-                type="submit"
-                disabled={busy}
-                className="button-brand mt-1 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-[12.5px] font-semibold shadow-sm transition duration-200 hover:brightness-110 active:scale-[0.99] disabled:bg-line disabled:bg-none disabled:text-muted disabled:shadow-none"
-              >
-                {busy && <LoaderIcon className="size-4 animate-spin" />}
-                {busy ? "Création…" : "Créer mon compte"}
-              </button>
             </form>
           )}
 
+          <p className="mt-5 flex items-start gap-2 text-[10px] leading-relaxed text-muted">
+            <LockIcon className="mt-0.5 size-3.5 shrink-0" />
+            Votre carnet de contacts est privé. Personne d’autre ne peut voir
+            les personnes que vous avez enregistrées.
+          </p>
+
           {import.meta.env.DEV && (
-            <p className="mt-5 rounded-2xl bg-surface-muted px-3.5 py-2.5 text-[10.5px] leading-relaxed text-muted">
-              Démo : <span className="font-semibold text-ink">awa</span> /{" "}
-              <span className="font-semibold text-ink">NteriDemo2026!</span>
+            <p className="mt-4 rounded-2xl bg-surface-muted px-3.5 py-2.5 text-[10.5px] leading-relaxed text-muted">
+              Démo :{" "}
+              <span className="font-semibold text-ink">+223 76 12 34 56</span>.
+              Le code s’affiche après la demande en mode développement.
             </p>
           )}
         </section>

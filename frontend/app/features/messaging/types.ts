@@ -16,6 +16,7 @@ export interface Chat {
   id: string;
   kind: ChatKind;
   name: string;
+  members: Contact[];
   memberIds: string[];
   createdAt: string;
 }

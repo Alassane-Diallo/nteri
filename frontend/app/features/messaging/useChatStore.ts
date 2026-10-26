@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  currentNotificationPermission,
+  enableBrowserNotifications,
+  showMessageNotification,
+} from "~/features/notifications/browser";
+import type { NotificationPermissionState } from "~/features/notifications/browser";
+import {
+  ensurePushSubscription,
+  registerPushNotifications,
+  unregisterPushNotifications,
+} from "~/features/notifications/push";
 import { toneFor } from "~/lib/identity";
 import {
   ApiError,
@@ -12,13 +23,14 @@ import type {
   ApiMessage,
   ApiUser,
   InboxEvent,
-  LoginPayload,
-  RegisterPayload,
+  OtpRequestResponse,
+  OtpVerifyPayload,
   SocketStatus,
 } from "./api";
 import type { Chat, Contact, Message } from "./types";
 
 export type SessionStatus = "loading" | "anonymous" | "authenticated";
+export type OtpVerifyResult = "authenticated" | "requires-name" | "error";
 
 interface NewGroupInput {
   name: string;
@@ -40,6 +52,7 @@ function toChat(conversation: ApiConversation): Chat {
     id: conversation.id,
     kind: conversation.kind,
     name: conversation.name,
+    members: conversation.members.map(toContact),
     memberIds: conversation.memberIds,
     createdAt: conversation.createdAt,
   };
@@ -105,6 +118,30 @@ function errorMessage(error: unknown): string {
   return "Une erreur inattendue est survenue.";
 }
 
+function chatTitle(chat: Chat | undefined, currentUserId: string): string {
+  if (!chat) {
+    return "N’Teri";
+  }
+  if (chat.kind === "group") {
+    return chat.name;
+  }
+
+  return (
+    chat.members.find((member) => member.id !== currentUserId)?.name ??
+    chat.name
+  );
+}
+
+function notificationBody(message: Message, chat: Chat | undefined): string {
+  if (!chat || chat.kind === "direct") {
+    return message.body;
+  }
+
+  const author = chat.members.find((member) => member.id === message.authorId);
+
+  return author ? `${author.name.split(" ")[0]} : ${message.body}` : message.body;
+}
+
 export function useChatStore(activeChatId: string | null) {
   const [status, setStatus] = useState<SessionStatus>("loading");
   const [currentUser, setCurrentUser] = useState<Contact | null>(null);
@@ -115,9 +152,16 @@ export function useChatStore(activeChatId: string | null) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [socketStatus, setSocketStatus] = useState<SocketStatus>("offline");
+  const [notifications, setNotifications] =
+    useState<NotificationPermissionState>("unsupported");
+  const [pushEnabled, setPushEnabled] = useState(false);
 
   const activeChatRef = useRef<string | null>(activeChatId);
   const chatsRef = useRef<Chat[]>([]);
+
+  useEffect(() => {
+    setNotifications(currentNotificationPermission());
+  }, []);
 
   useEffect(() => {
     activeChatRef.current = activeChatId;
@@ -134,10 +178,12 @@ export function useChatStore(activeChatId: string | null) {
     setMessages([]);
     setUnreadByChat({});
     setSocketStatus("offline");
+    setPushEnabled(false);
   }, []);
 
   const expireSession = useCallback(
     (message: string) => {
+      void unregisterPushNotifications();
       clearWorkspace();
       setStatus("anonymous");
       setError(message);
@@ -204,6 +250,24 @@ export function useChatStore(activeChatId: string | null) {
     };
   }, [loadWorkspace]);
 
+  useEffect(() => {
+    if (status !== "authenticated") {
+      setPushEnabled(false);
+      return;
+    }
+
+    let cancelled = false;
+    void ensurePushSubscription().then((enabled) => {
+      if (!cancelled) {
+        setPushEnabled(enabled);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
+
   const refreshConversations = useCallback(async () => {
     try {
       const conversations = await chatApi.conversations();
@@ -234,6 +298,17 @@ export function useChatStore(activeChatId: string | null) {
             [message.chatId]: isActive ? 0 : event.unread,
           }));
 
+          if (message.kind === "text" && document.hidden && !pushEnabled) {
+            const chat = chatsRef.current.find(
+              (candidate) => candidate.id === message.chatId,
+            );
+            showMessageNotification({
+              title: chatTitle(chat, currentUser.id),
+              body: notificationBody(message, chat),
+              chatId: message.chatId,
+            });
+          }
+
           if (!chatsRef.current.some((chat) => chat.id === message.chatId)) {
             void refreshConversations();
           } else if (isActive) {
@@ -251,43 +326,55 @@ export function useChatStore(activeChatId: string | null) {
     );
 
     return disconnect;
-  }, [currentUser, expireSession, refreshConversations, status]);
+  }, [
+    currentUser,
+    expireSession,
+    pushEnabled,
+    refreshConversations,
+    status,
+  ]);
 
-  const login = useCallback(
-    async (payload: LoginPayload): Promise<boolean> => {
+  const requestOtp = useCallback(
+    async (phone: string): Promise<OtpRequestResponse | null> => {
       setBusy(true);
       setError(null);
       try {
-        const response = await authApi.login(payload);
-        setCurrentUser(toContact(response.user));
-        await loadWorkspace(response.user);
-
-        return true;
+        return await authApi.requestOtp(phone);
       } catch (failure) {
         setError(handleFailure(failure));
 
-        return false;
+        return null;
       } finally {
         setBusy(false);
       }
     },
-    [handleFailure, loadWorkspace],
+    [handleFailure],
   );
 
-  const register = useCallback(
-    async (payload: RegisterPayload): Promise<boolean> => {
+  const verifyOtp = useCallback(
+    async (payload: OtpVerifyPayload): Promise<OtpVerifyResult> => {
       setBusy(true);
       setError(null);
       try {
-        const response = await authApi.register(payload);
+        const response = await authApi.verifyOtp(payload);
         setCurrentUser(toContact(response.user));
         await loadWorkspace(response.user);
 
-        return true;
+        return "authenticated";
       } catch (failure) {
+        if (
+          failure instanceof ApiError &&
+          failure.fields !== null &&
+          failure.fields.requiresName === true
+        ) {
+          setError(failure.message);
+
+          return "requires-name";
+        }
+
         setError(handleFailure(failure));
 
-        return false;
+        return "error";
       } finally {
         setBusy(false);
       }
@@ -297,6 +384,11 @@ export function useChatStore(activeChatId: string | null) {
 
   const logout = useCallback(async () => {
     setBusy(true);
+    try {
+      await unregisterPushNotifications();
+    } catch {
+      // Le serveur supprime aussi les abonnements lors de la déconnexion.
+    }
     try {
       await authApi.logout();
     } catch {
@@ -346,14 +438,51 @@ export function useChatStore(activeChatId: string | null) {
     [handleFailure],
   );
 
-  const createDirect = useCallback(
-    async (contactId: string): Promise<string | null> => {
-      if (!contactId) {
-        setError("Sélectionnez une personne pour démarrer la discussion.");
+  const addContact = useCallback(
+    async (phone: string, name?: string): Promise<Contact | null> => {
+      setError(null);
+      try {
+        const contact = toContact(await chatApi.addContact(phone, name));
+        setContacts((current) => {
+          const byId = new Map(current.map((item) => [item.id, item]));
+          byId.set(contact.id, contact);
+
+          return Array.from(byId.values()).sort((first, second) =>
+            first.name.localeCompare(second.name, "fr"),
+          );
+        });
+
+        return contact;
+      } catch (failure) {
+        setError(handleFailure(failure));
 
         return null;
       }
+    },
+    [handleFailure],
+  );
 
+  const removeContact = useCallback(
+    async (contactId: string): Promise<boolean> => {
+      setError(null);
+      try {
+        await chatApi.removeContact(contactId);
+        setContacts((current) =>
+          current.filter((contact) => contact.id !== contactId),
+        );
+
+        return true;
+      } catch (failure) {
+        setError(handleFailure(failure));
+
+        return false;
+      }
+    },
+    [handleFailure],
+  );
+
+  const startDirectChat = useCallback(
+    async (contactId: string): Promise<string | null> => {
       setError(null);
       try {
         const conversation = await chatApi.createDirect(contactId);
@@ -375,6 +504,22 @@ export function useChatStore(activeChatId: string | null) {
     },
     [handleFailure],
   );
+
+  const enableNotifications = useCallback(async () => {
+    const permission = await enableBrowserNotifications();
+    setNotifications(permission);
+    if (permission === "denied") {
+      setError(
+        "Les notifications sont bloquées. Autorisez-les dans les réglages du navigateur.",
+      );
+      setPushEnabled(false);
+      return;
+    }
+    if (permission === "granted") {
+      const push = await registerPushNotifications();
+      setPushEnabled(push);
+    }
+  }, []);
 
   const createGroup = useCallback(
     async (input: NewGroupInput): Promise<string | null> => {
@@ -432,15 +577,19 @@ export function useChatStore(activeChatId: string | null) {
     messages,
     unreadByChat,
     socketStatus,
+    notifications,
     busy,
     error,
-    login,
-    register,
+    requestOtp,
+    verifyOtp,
     logout,
     loadMessages,
     sendMessage,
-    createDirect,
     createGroup,
+    addContact,
+    removeContact,
+    startDirectChat,
+    enableNotifications,
     markRead,
     clearError,
   };

@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 from datetime import UTC
+from urllib.parse import urlparse
 
-from django.contrib.auth.password_validation import validate_password
-from django.core.exceptions import ValidationError as DjangoValidationError
+from django.conf import settings
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Conversation, Message, User
+from .models import Contact, Conversation, Message, User
 from .validators import (
     normalize_message_body,
     normalize_phone,
     normalize_single_line,
-    normalize_username,
 )
 
 
@@ -70,6 +69,74 @@ class UserSerializer(serializers.ModelSerializer):
         return isoformat(obj.last_seen)
 
 
+class ContactSerializer(serializers.ModelSerializer):
+    id = serializers.SerializerMethodField()
+    username = serializers.SerializerMethodField()
+    name = serializers.SerializerMethodField()
+    phone = serializers.SerializerMethodField()
+    avatar = serializers.SerializerMethodField()
+    presence = serializers.SerializerMethodField()
+    lastSeen = serializers.SerializerMethodField()
+    alias = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = Contact
+        fields = (
+            "id",
+            "username",
+            "name",
+            "alias",
+            "phone",
+            "avatar",
+            "presence",
+            "lastSeen",
+        )
+
+    def get_id(self, obj: Contact) -> str:
+        return str(obj.contact_id)
+
+    def get_username(self, obj: Contact) -> str:
+        return obj.contact.username
+
+    def get_name(self, obj: Contact) -> str:
+        return obj.display_name
+
+    def get_phone(self, obj: Contact) -> str | None:
+        return obj.contact.phone
+
+    def get_avatar(self, obj: Contact) -> str:
+        return obj.contact.avatar
+
+    def get_presence(self, obj: Contact) -> str:
+        return presence_label(obj.contact.last_seen)
+
+    def get_lastSeen(self, obj: Contact) -> str | None:
+        return isoformat(obj.contact.last_seen)
+
+
+class ContactCreateSerializer(serializers.Serializer):
+    phone = serializers.CharField(max_length=32)
+    name = serializers.CharField(
+        max_length=150,
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+
+    def validate_phone(self, value: str) -> str:
+        return normalize_phone(value)
+
+    def validate_name(self, value: str) -> str:
+        if not value.strip():
+            return ""
+
+        return normalize_single_line(
+            value,
+            label="Le nom du contact",
+            max_length=150,
+        )
+
+
 class MessageSerializer(serializers.ModelSerializer):
     id = serializers.SerializerMethodField()
     chatId = serializers.SerializerMethodField()
@@ -106,6 +173,7 @@ class ConversationSerializer(serializers.ModelSerializer):
     kind = serializers.SerializerMethodField()
     name = serializers.SerializerMethodField()
     title = serializers.SerializerMethodField()
+    members = serializers.SerializerMethodField()
     memberIds = serializers.SerializerMethodField()
     memberCount = serializers.SerializerMethodField()
     createdAt = serializers.SerializerMethodField()
@@ -122,6 +190,7 @@ class ConversationSerializer(serializers.ModelSerializer):
             "name",
             "title",
             "avatar",
+            "members",
             "memberIds",
             "memberCount",
             "createdAt",
@@ -164,6 +233,13 @@ class ConversationSerializer(serializers.ModelSerializer):
     def get_title(self, obj: Conversation) -> str:
         return self.get_name(obj)
 
+    def get_members(self, obj: Conversation) -> list[dict]:
+        return UserSerializer(
+            self._members(obj),
+            many=True,
+            context=self.context,
+        ).data
+
     def get_memberIds(self, obj: Conversation) -> list[str]:
         return [str(member.pk) for member in self._members(obj)]
 
@@ -201,78 +277,86 @@ class ConversationSerializer(serializers.ModelSerializer):
         return bool(other and presence_label(other.last_seen) == "En ligne")
 
 
-class RegisterSerializer(serializers.Serializer):
-    username = serializers.CharField(max_length=150)
-    name = serializers.CharField(max_length=150)
+class PushSubscriptionSerializer(serializers.Serializer):
+    endpoint = serializers.URLField(max_length=500)
+    keys = serializers.DictField(child=serializers.CharField(max_length=200))
+
+    def validate_endpoint(self, value: str) -> str:
+        parsed = urlparse(value)
+        hostname = (parsed.hostname or "").lower().rstrip(".")
+        if (
+            parsed.scheme != "https"
+            or not hostname
+            or parsed.username
+            or parsed.password
+        ):
+            raise serializers.ValidationError(
+                "L’abonnement Push doit utiliser une adresse HTTPS valide."
+            )
+
+        allowed_hosts = [
+            host.lower().strip(".")
+            for host in getattr(settings, "PUSH_ALLOWED_HOSTS", [])
+        ]
+        if not any(
+            hostname == host or hostname.endswith(f".{host}")
+            for host in allowed_hosts
+        ):
+            raise serializers.ValidationError(
+                "Ce service de notifications Push n’est pas autorisé."
+            )
+
+        return value
+
+    def validate_keys(self, value: dict) -> dict:
+        p256dh = str(value.get("p256dh", "")).strip()
+        auth = str(value.get("auth", "")).strip()
+        if not p256dh or not auth:
+            raise serializers.ValidationError(
+                "Les clés de l’abonnement Push sont incomplètes."
+            )
+
+        return {"p256dh": p256dh, "auth": auth}
+
+
+class PushUnsubscribeSerializer(serializers.Serializer):
+    endpoint = serializers.URLField(max_length=500)
+
+
+class OtpRequestSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=32)
-    password = serializers.CharField(
-        max_length=128,
-        trim_whitespace=False,
-        write_only=True,
-    )
-
-    def validate_username(self, value: str) -> str:
-        username = normalize_username(value)
-        if User.objects.filter(username__iexact=username).exists():
-            raise serializers.ValidationError("Ce nom d’utilisateur est déjà pris.")
-
-        return username
 
     def validate_phone(self, value: str) -> str:
-        phone = normalize_phone(value)
-        if User.objects.filter(phone__iexact=phone).exists():
-            raise serializers.ValidationError("Ce numéro est déjà utilisé.")
+        return normalize_phone(value)
 
-        return phone
 
-    def validate(self, attrs: dict) -> dict:
-        name = normalize_single_line(
-            attrs["name"],
+class OtpVerifySerializer(serializers.Serializer):
+    phone = serializers.CharField(max_length=32)
+    code = serializers.RegexField(
+        regex=r"^\d{6}$",
+        error_messages={
+            "invalid": "Le code doit contenir exactement 6 chiffres.",
+        },
+    )
+    name = serializers.CharField(
+        max_length=150,
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+
+    def validate_phone(self, value: str) -> str:
+        return normalize_phone(value)
+
+    def validate_name(self, value: str) -> str:
+        if not value.strip():
+            return ""
+
+        return normalize_single_line(
+            value,
             label="Le nom",
             max_length=150,
         )
-        parts = name.split(" ", 1)
-        attrs["first_name"] = parts[0]
-        attrs["last_name"] = parts[1] if len(parts) > 1 else ""
-        attrs["display_name"] = name
-
-        candidate = User(
-            username=attrs["username"],
-            first_name=attrs["first_name"],
-            last_name=attrs["last_name"],
-        )
-        try:
-            validate_password(attrs["password"], user=candidate)
-        except DjangoValidationError as error:
-            raise serializers.ValidationError(
-                {"password": list(error.messages)}
-            ) from error
-
-        return attrs
-
-    def create(self, validated_data: dict) -> User:
-        password = validated_data.pop("password")
-        validated_data.pop("display_name")
-        validated_data.pop("name")
-
-        return User.objects.create_user(
-            password=password,
-            first_name=validated_data.pop("first_name"),
-            last_name=validated_data.pop("last_name"),
-            **validated_data,
-        )
-
-
-class LoginSerializer(serializers.Serializer):
-    username = serializers.CharField(max_length=150)
-    password = serializers.CharField(
-        max_length=128,
-        trim_whitespace=False,
-        write_only=True,
-    )
-
-    def validate_username(self, value: str) -> str:
-        return value.strip().lower()
 
 
 class ConversationCreateSerializer(serializers.Serializer):
@@ -311,13 +395,21 @@ class ConversationCreateSerializer(serializers.Serializer):
                 "Sélectionnez au moins un autre membre."
             )
 
-        users = list(
-            User.objects.filter(pk__in=member_ids, is_active=True).order_by("id")
+        links = list(
+            Contact.objects.filter(
+                owner=request.user,
+                contact_id__in=member_ids,
+                contact__is_active=True,
+            )
+            .select_related("contact")
+            .order_by("contact_id")
         )
-        if len(users) != len(member_ids):
-            raise serializers.ValidationError("Un des membres est introuvable.")
+        if len(links) != len(member_ids):
+            raise serializers.ValidationError(
+                "Un des membres ne fait pas partie de votre carnet de contacts."
+            )
 
-        self._members = users
+        self._members = [link.contact for link in links]
 
         return member_ids
 

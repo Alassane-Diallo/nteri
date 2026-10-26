@@ -4,6 +4,7 @@ export interface ApiUser {
   id: string;
   username: string;
   name: string;
+  alias?: string;
   phone: string | null;
   avatar: string;
   presence: string;
@@ -25,6 +26,7 @@ export interface ApiConversation {
   name: string;
   title: string;
   avatar: string;
+  members: ApiUser[];
   memberIds: string[];
   memberCount: number;
   createdAt: string;
@@ -37,6 +39,20 @@ export interface ApiConversation {
 export interface ApiAuthResponse {
   user: ApiUser;
   csrfToken: string;
+  isNewAccount?: boolean;
+}
+
+export interface ApiPushConfig {
+  enabled: boolean;
+  publicKey: string;
+}
+
+export interface ApiPushSubscriptionPayload {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
 }
 
 export interface ApiMessagePage {
@@ -44,16 +60,16 @@ export interface ApiMessagePage {
   hasMore: boolean;
 }
 
-export interface LoginPayload {
-  username: string;
-  password: string;
+export interface OtpRequestResponse {
+  detail: string;
+  expiresIn: number;
+  devCode?: string;
 }
 
-export interface RegisterPayload {
-  username: string;
-  name: string;
+export interface OtpVerifyPayload {
   phone: string;
-  password: string;
+  code: string;
+  name?: string;
 }
 
 export type SocketStatus = "connecting" | "online" | "offline";
@@ -123,7 +139,7 @@ function errorFromResponse(status: number, body: unknown): ApiError {
   if (isRecord(body)) {
     const payload = body as ApiErrorBody;
     if (typeof payload.detail === "string") {
-      return new ApiError(status, payload.detail, null);
+      return new ApiError(status, payload.detail, body);
     }
 
     return new ApiError(
@@ -272,18 +288,15 @@ export const authApi = {
     return request<ApiUser>("/api/auth/me/");
   },
 
-  async login(payload: LoginPayload): Promise<ApiAuthResponse> {
-    const response = await request<ApiAuthResponse>("/api/auth/login/", {
+  async requestOtp(phone: string): Promise<OtpRequestResponse> {
+    return request<OtpRequestResponse>("/api/auth/otp/request/", {
       method: "POST",
-      body: payload,
+      body: { phone },
     });
-    storeCsrfToken(response.csrfToken);
-
-    return response;
   },
 
-  async register(payload: RegisterPayload): Promise<ApiAuthResponse> {
-    const response = await request<ApiAuthResponse>("/api/auth/register/", {
+  async verifyOtp(payload: OtpVerifyPayload): Promise<ApiAuthResponse> {
+    const response = await request<ApiAuthResponse>("/api/auth/otp/verify/", {
       method: "POST",
       body: payload,
     });
@@ -304,6 +317,27 @@ export const authApi = {
 export const chatApi = {
   async contacts(): Promise<ApiUser[]> {
     return request<ApiUser[]>("/api/contacts/");
+  },
+
+  async addContact(phone: string, name?: string): Promise<ApiUser> {
+    return request<ApiUser>("/api/contacts/", {
+      method: "POST",
+      body: name?.trim() ? { phone, name: name.trim() } : { phone },
+    });
+  },
+
+  async removeContact(contactId: string): Promise<void> {
+    await request<void>(
+      `/api/contacts/${encodeURIComponent(contactId)}/`,
+      { method: "DELETE" },
+    );
+  },
+
+  async createDirect(contactId: string): Promise<ApiConversation> {
+    return request<ApiConversation>("/api/conversations/", {
+      method: "POST",
+      body: { kind: "direct", memberIds: [contactId] },
+    });
   },
 
   async conversations(): Promise<ApiConversation[]> {
@@ -339,13 +373,6 @@ export const chatApi = {
     );
   },
 
-  async createDirect(contactId: string): Promise<ApiConversation> {
-    return request<ApiConversation>("/api/conversations/", {
-      method: "POST",
-      body: { kind: "direct", memberIds: [contactId] },
-    });
-  },
-
   async createGroup(name: string, memberIds: string[]): Promise<ApiConversation> {
     return request<ApiConversation>("/api/conversations/", {
       method: "POST",
@@ -371,6 +398,28 @@ function websocketUrl(): string {
 
   return base.toString();
 }
+
+export const pushApi = {
+  async config(): Promise<ApiPushConfig> {
+    return request<ApiPushConfig>("/api/push/config/");
+  },
+
+  async subscribe(
+    payload: ApiPushSubscriptionPayload,
+  ): Promise<{ enabled: boolean; id: number }> {
+    return request<{ enabled: boolean; id: number }>("/api/push/subscribe/", {
+      method: "POST",
+      body: payload,
+    });
+  },
+
+  async unsubscribe(endpoint: string): Promise<void> {
+    await request<void>("/api/push/unsubscribe/", {
+      method: "POST",
+      body: { endpoint },
+    });
+  },
+};
 
 export function connectInbox(
   onEvent: (event: InboxEvent) => void,

@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from chat.models import Conversation, ConversationParticipant, Message, User
+from chat.models import Contact, Conversation, ConversationParticipant, Message, User
 from chat.services import direct_key_for
 
 DEMO_PASSWORD = os.getenv("NTERI_DEMO_PASSWORD", "NteriDemo2026!")
@@ -137,9 +137,12 @@ class Command(BaseCommand):
         for definition in CONVERSATIONS:
             self._create_conversation(definition, users)
 
+        self._create_contacts(users)
+
         self.stdout.write(self.style.SUCCESS("Données de démonstration prêtes."))
         self.stdout.write(
-            f"Connexion : awa / {DEMO_PASSWORD} (tous les comptes utilisent ce mot de passe)."
+            "Connexion : +223 76 12 34 56 (code OTP ; en développement, "
+            "le code est affiché par le serveur)."
         )
 
     def _create_users(self, reset_passwords: bool) -> dict[str, User]:
@@ -183,6 +186,19 @@ class Command(BaseCommand):
             Conversation.objects.filter(direct_key=key).delete()
 
         self.stdout.write(f"Conversations réinitialisées ({len(keys)} clés).")
+
+    def _create_contacts(self, users: dict[str, User]) -> None:
+        members = list(users.values())
+        links = [
+            Contact(owner=owner, contact=contact)
+            for owner in members
+            for contact in members
+            if owner.pk != contact.pk
+        ]
+        Contact.objects.bulk_create(links, ignore_conflicts=True)
+        self.stdout.write(
+            self.style.SUCCESS(f"Carnets de contacts préparés ({len(links)} liens).")
+        )
 
     def _create_conversation(self, definition: dict, users: dict[str, User]) -> None:
         member_users = [users[username] for username in definition["members"]]

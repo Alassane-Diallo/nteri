@@ -1,19 +1,23 @@
 # N’Teri
 
 Une messagerie simple aux couleurs du Mali : messages texte en temps réel,
-conversations privées et groupes.
+carnet de contacts privé, conversations directes et groupes.
 
 Le projet est composé de deux applications :
 
-- ce frontend React Router dans `demo/nteri` ;
-- l’API Django dans `demo/py/nteri-api`.
+- ce frontend React Router dans `frontend/` ;
+- l’API Django dans `backend/`.
 
 ## Fonctionnalités
 
-- Inscription, connexion et déconnexion par session sécurisée
-- Conversations directes et groupes
+- Connexion par numéro de téléphone et code OTP
+- Création de compte automatique après vérification d’un nouveau numéro
+- Carnet de contacts privé : chaque personne ne voit que ses propres contacts
+- Conversations directes avec une personne de son carnet
+- Groupes avec un nom et au moins deux contacts
 - Messages texte en temps réel via WebSocket
-- Création d’un groupe avec un nom et au moins deux membres
+- Notifications locales lorsque l’onglet est masqué, et Web Push lorsque
+  l’application est fermée si le serveur est configuré pour cela
 - Recherche, filtres « Toutes / Non lues / Groupes » et compteurs de messages
   non lus calculés par le serveur
 - Interface mobile et bureau, thème clair ou sombre selon le système
@@ -32,7 +36,7 @@ Le projet est composé de deux applications :
 Le frontend a besoin de l’API pour fonctionner. Dans un premier terminal :
 
 ```bash
-cd ../py/nteri-api
+cd ../backend
 source .venv/bin/activate
 python manage.py migrate
 python manage.py seed_demo
@@ -59,15 +63,33 @@ NTERI_BACKEND_URL=http://127.0.0.1:8000 npm run dev
 
 ### Comptes de démonstration
 
-Après `seed_demo`, tous les comptes utilisent le même mot de passe :
+Après `seed_demo`, la connexion se fait avec le numéro de téléphone. En
+développement, le code OTP est affiché dans l’interface ou dans les logs
+Django selon `NTERI_EXPOSE_OTP`.
 
-| Nom d’utilisateur | Nom | Mot de passe |
-| --- | --- | --- |
-| `awa` | Awa Traoré | `NteriDemo2026!` |
-| `moussa` | Moussa Diarra | `NteriDemo2026!` |
-| `fatoumata` | Fatoumata Keïta | `NteriDemo2026!` |
+| Nom | Téléphone |
+| --- | --- |
+| Awa Traoré | `+22376123456` |
+| Moussa Diarra | `+22370451289` |
+| Fatoumata Keïta | `+22375086321` |
 
-## Vérification et déploiement
+Les comptes conservent un mot de passe Django (`NteriDemo2026!` par défaut)
+uniquement pour l’administration. L’interface N’Teri ne propose plus de
+connexion par mot de passe.
+
+### Notifications
+
+Le bouton cloche du bandeau latéral demande l’autorisation du navigateur.
+Sans configuration Web Push côté serveur, les notifications restent locales :
+elles s’affichent lorsque l’onglet est masqué. Avec les clés VAPID configurées
+dans l’API, le service worker `public/sw.js` reçoit aussi les messages lorsque
+l’application est fermée.
+
+Les notifications Push nécessitent HTTPS en production (localhost est accepté
+en développement). Un clic sur une notification ouvre la conversation
+concernée.
+
+## Vérification et production
 
 ```bash
 npm run typecheck   # génère les types de routes puis vérifie TypeScript
@@ -75,14 +97,20 @@ npm run build       # construit build/client et build/server
 npm start           # sert le build sur le port 3000 (PORT pour changer)
 ```
 
-Sur Vercel, le dépôt de déploiement utilise **un seul projet avec deux
-services** : le frontend est servi sur `/`, l’API sur `/api` et `/ws`. Le
-frontend et l’API partagent donc la même origine.
+Le serveur de production ne fait pas de proxy vers Django. Déployez le
+frontend et l’API derrière un reverse proxy de même origine :
 
-Laissez `VITE_API_URL` et `VITE_WS_URL` vides : le client utilise les chemins
-relatifs et `window.location.origin`. Si vous séparez un jour les deux
-origines, définissez ces variables à la construction puis adaptez
+- `/` et les assets → serveur React Router (`npm start`) ;
+- `/api` → Django ;
+- `/ws` → Django en ASGI, avec le support WebSocket.
+
+Le service worker est copié dans `build/client/sw.js` et doit être servi à la
+racine du site.
+
+Si le frontend et l’API sont sur des origines différentes, définissez
+`VITE_API_URL` et `VITE_WS_URL` à la construction, puis adaptez
 `DJANGO_CORS_ALLOWED_ORIGINS`, `DJANGO_CSRF_TRUSTED_ORIGINS` et les cookies.
+Le déploiement sur une même origine reste fortement recommandé.
 
 ## Structure
 
@@ -90,40 +118,56 @@ origines, définissez ces variables à la construction puis adaptez
 app/
 ├── components/                 # Briques visuelles partagées (avatar, icônes, logo)
 ├── features/auth/
-│   └── AuthScreen.tsx          # Connexion et création de compte
+│   └── AuthScreen.tsx          # Connexion par téléphone et code OTP
 ├── features/messaging/
-│   ├── api.ts                  # Client REST, CSRF, session et WebSocket
-│   ├── components/             # Liste, conversation, composeur, dialogue de groupe
+│   ├── api.ts                  # Client REST, CSRF, session, Push et WebSocket
+│   ├── components/             # Liste, conversation, composeur, contacts, groupe
 │   ├── format.ts               # Formats de date et de compteurs
 │   ├── selectors.ts            # Résumés de conversations et tri des messages
 │   ├── types.ts                # Modèle de données
 │   └── useChatStore.ts         # État piloté par l’API et événements temps réel
+├── features/notifications/
+│   ├── browser.ts              # Notifications locales du navigateur
+│   └── push.ts                 # Abonnement Web Push et service worker
 ├── routes/home.tsx             # Garde d’authentification et écran principal
 ├── routes.ts                   # Déclaration explicite des routes
 └── app.css                     # Tokens de design et styles globaux
+public/
+└── sw.js                       # Réception Push et clic sur notification
 ```
 
 ## Sécurité
 
-- Aucun message, groupe ou identifiant utilisateur n’est stocké dans le
-  `localStorage`. L’état est reconstruit depuis l’API à chaque ouverture.
+- Aucun message, contact, groupe ou identifiant utilisateur n’est stocké dans
+  le `localStorage`. L’état est reconstruit depuis l’API à chaque ouverture.
 - La session repose sur un cookie `HttpOnly` ; le jeton CSRF est demandé au
   serveur et conservé en mémoire, puis envoyé dans `X-CSRFToken`.
+- Le carnet de contacts est privé et filtré côté serveur. L’interface ne
+  propose jamais d’annuaire global.
+- Créer une conversation directe exige que la personne soit dans le carnet du
+  créateur ; recevoir un message d’un inconnu reste possible, comme dans
+  WhatsApp.
 - Le WebSocket `/ws/inbox/` est authentifié par la session. Le client ne
   fournit jamais d’identifiant utilisateur pour s’abonner à un flux.
 - Les messages sont envoyés par REST ; seul le serveur décide des
   participants autorisés et du nombre de messages non lus.
+- La clé privée VAPID reste côté serveur. Le navigateur ne reçoit que la clé
+  publique.
 - Les erreurs réseau et les réponses du serveur sont affichées sans exposer de
   détails techniques.
 
 ## Portée
 
-Le périmètre actuel couvre les messages texte et la création de groupes. Les
-médias, appels et pièces jointes ne sont pas pris en charge.
+Le périmètre actuel couvre les messages texte, les contacts privés et la
+création de groupes. Les médias, appels et pièces jointes ne sont pas pris en
+charge.
 
 ## Vercel
 
-Le déploiement Vercel est décrit dans le `README.md` à la racine du dépôt de
-déploiement. Le `Dockerfile` du dépôt source n’est pas utilisé : Vercel détecte
-directement l’application React Router et construit `build/client` et
-`build/server`.
+Le dépôt de déploiement utilise un seul projet Vercel avec deux services :
+le frontend est servi sur `/`, l’API sur `/api` et `/ws`. Le frontend et l’API
+partagent donc la même origine.
+
+Laissez `VITE_API_URL` et `VITE_WS_URL` vides en production : le client utilise
+les chemins relatifs et `window.location.origin`. La configuration complète du
+déploiement se trouve dans le `README.md` à la racine du dépôt de déploiement.

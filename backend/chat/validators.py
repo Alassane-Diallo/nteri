@@ -8,7 +8,6 @@ from rest_framework import serializers
 CONTROL_CHARACTERS = re.compile(
     r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u202a-\u202e\u2066-\u2069\ufeff]"
 )
-USERNAME_VALIDATOR = re.compile(r"^[a-z0-9_.-]{3,30}$")
 PHONE_ALLOWED = re.compile(r"^\+?[0-9 .()\-]+$")
 
 
@@ -49,33 +48,32 @@ def normalize_message_body(value: str) -> str:
     return normalized
 
 
-def normalize_username(value: str) -> str:
-    normalized = value.strip().lower()
-
-    if not USERNAME_VALIDATOR.fullmatch(normalized):
-        raise serializers.ValidationError(
-            "Le nom d’utilisateur doit contenir 3 à 30 caractères : "
-            "lettres minuscules, chiffres, point, tiret ou souligné."
-        )
-
-    return normalized
-
-
 def normalize_phone(value: str) -> str:
     raw = value.strip()
     if not raw or not PHONE_ALLOWED.fullmatch(raw):
         raise serializers.ValidationError("Numéro de téléphone invalide.")
 
     digits = re.sub(r"\D", "", raw)
-    if digits.startswith("00"):
+    starts_with_plus = raw.startswith("+")
+    starts_with_00 = raw.startswith("00")
+    if starts_with_00:
         digits = digits[2:]
-        raw = f"+{raw}"
+
+    if not starts_with_plus and not starts_with_00:
+        if len(digits) == 8:
+            # Les numéros maliens sont saisis le plus souvent sans indicatif.
+            digits = f"223{digits}"
 
     if not 8 <= len(digits) <= 15:
         raise serializers.ValidationError(
             "Le numéro de téléphone doit contenir entre 8 et 15 chiffres."
         )
 
-    prefix = "+" if raw.startswith("+") else ""
+    if (
+        starts_with_plus
+        or starts_with_00
+        or (len(digits) == 11 and digits.startswith("223"))
+    ):
+        return f"+{digits}"
 
-    return f"{prefix}{digits}"
+    return digits

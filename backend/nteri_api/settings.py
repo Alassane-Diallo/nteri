@@ -367,6 +367,38 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 64 * 1024
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 50
 DATA_UPLOAD_MAX_NUMBER_FILES = 0
 
+# --- Authentification par SMS ----------------------------------------------
+
+SMS_BACKEND = os.getenv("NTERI_SMS_BACKEND", "console").strip().lower()
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "").strip()
+SMS_WEBHOOK_URL = os.getenv("NTERI_SMS_WEBHOOK_URL", "").strip()
+SMS_WEBHOOK_TOKEN = os.getenv("NTERI_SMS_WEBHOOK_TOKEN", "").strip()
+
+# Le code OTP ne doit jamais être renvoyé au client hors développement.
+EXPOSE_OTP = DEBUG and env_bool("NTERI_EXPOSE_OTP", True)
+
+# --- Notifications Web Push -------------------------------------------------
+# Générez une paire de clés VAPID et renseignez les deux variables pour
+# activer les notifications lorsque l’application est fermée. Sans clés,
+# l’interface conserve les notifications locales tant que l’onglet est ouvert.
+VAPID_PUBLIC_KEY = os.getenv("NTERI_VAPID_PUBLIC_KEY", "").strip()
+VAPID_PRIVATE_KEY = os.getenv("NTERI_VAPID_PRIVATE_KEY", "").strip()
+VAPID_SUBJECT = os.getenv(
+    "NTERI_VAPID_SUBJECT",
+    "mailto:contact@nteri.app",
+).strip()
+
+# Les endpoints Web Push sont fournis par les navigateurs. Cette liste évite
+# qu’un utilisateur authentifié fasse envoyer des requêtes serveur vers un hôte
+# arbitraire. Ajoutez un suffixe si vous utilisez un autre service de Push.
+PUSH_ALLOWED_HOSTS = env_list(
+    "NTERI_PUSH_ALLOWED_HOSTS",
+    "fcm.googleapis.com,updates.push.services.mozilla.com,"
+    "web.push.apple.com,notify.windows.com",
+)
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",

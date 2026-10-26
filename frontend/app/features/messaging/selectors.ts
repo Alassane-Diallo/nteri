@@ -71,7 +71,13 @@ export function buildChatSummaries({
       const otherMember = chat.memberIds.find(
         (memberId) => memberId !== currentUserId,
       );
-      const contact = otherMember ? contactsById.get(otherMember) : undefined;
+      const chatMembersById = new Map(
+        chat.members.map((member) => [member.id, member]),
+      );
+      const contact = otherMember
+        ? (chatMembersById.get(otherMember) ??
+          contactsById.get(otherMember))
+        : undefined;
       const title =
         chat.kind === "direct" ? (contact?.name ?? chat.name) : chat.name;
 
@@ -79,7 +85,7 @@ export function buildChatSummaries({
         chat,
         title,
         preview: lastMessage
-          ? previewFor(lastMessage, chat, contactsById, currentUserId)
+          ? previewFor(lastMessage, chat, chatMembersById, currentUserId)
           : "Démarrez la conversation",
         lastAt: lastMessage?.sentAt ?? chat.createdAt,
         unread: unreadByChat[chat.id] ?? 0,

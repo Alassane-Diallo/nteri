@@ -38,6 +38,56 @@ export function PlusIcon(props: IconProps) {
   );
 }
 
+export function PhoneIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.2 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.78.62 2.63a2 2 0 0 1-.45 2.11L8 9.73a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.85.29 1.73.5 2.63.62A2 2 0 0 1 22 16.92Z" />
+    </Icon>
+  );
+}
+
+export function KeyIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="7.5" cy="15.5" r="4.5" />
+      <path d="m10.7 12.3 8.8-8.8" />
+      <path d="m15.5 7.5 2 2" />
+      <path d="m18.5 4.5 2 2" />
+    </Icon>
+  );
+}
+
+export function BellIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+      <path d="M10 21h4" />
+    </Icon>
+  );
+}
+
+export function BellOffIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M8.7 3.1A6 6 0 0 1 18 8c0 2.1.3 3.6.8 4.7" />
+      <path d="M6 8c0 7-3 7-3 9h13" />
+      <path d="M10 21h4" />
+      <path d="m2 2 20 20" />
+    </Icon>
+  );
+}
+
+export function UserPlusIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M19 8v6" />
+      <path d="M22 11h-6" />
+    </Icon>
+  );
+}
+
 export function UsersIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -89,6 +139,18 @@ export function XIcon(props: IconProps) {
     <Icon {...props}>
       <path d="m6 6 12 12" />
       <path d="m18 6-12 12" />
+    </Icon>
+  );
+}
+
+export function TrashIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 7h16" />
+      <path d="M9 7V4h6v3" />
+      <path d="m6 7 1 14h10l1-14" />
+      <path d="M10 11v6" />
+      <path d="M14 11v6" />
     </Icon>
   );
 }

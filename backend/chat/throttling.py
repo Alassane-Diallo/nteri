@@ -14,13 +14,6 @@ from rest_framework.throttling import ScopedRateThrottle
 
 from .models import AuthAttempt
 
-LOGIN_LIMIT = 10
-LOGIN_WINDOW = 60 * 5
-LOGIN_BLOCK = 60 * 15
-REGISTER_LIMIT = 5
-REGISTER_WINDOW = 60 * 60
-REGISTER_BLOCK = 60 * 60
-
 
 def client_ip(request) -> str:
     """Retourne l'IP du client sans faire confiance aux en-têtes par défaut."""
@@ -76,6 +69,7 @@ def record_attempt(
     limit: int,
     window_seconds: int,
     block_seconds: int,
+    enforce: bool = True,
 ) -> None:
     now = timezone.now()
     key = _key(scope, identifier)
@@ -103,7 +97,8 @@ def record_attempt(
             ]
         )
 
-    assert_not_blocked(scope, identifier)
+    if enforce:
+        assert_not_blocked(scope, identifier)
 
 
 def clear_attempts(scope: str, identifier: str) -> None:

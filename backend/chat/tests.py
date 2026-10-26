@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 from io import StringIO
+from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
 from channels.db import database_sync_to_async
@@ -16,7 +18,15 @@ from django.test import Client, TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
-from .models import AuthAttempt, Conversation, Message, User
+from .models import (
+    AuthAttempt,
+    Contact,
+    Conversation,
+    Message,
+    OtpChallenge,
+    PushSubscription,
+    User,
+)
 from .routing import websocket_urlpatterns
 from .services import create_message, get_or_create_direct_conversation
 
@@ -54,102 +64,151 @@ class AuthApiTests(APITestCase):
 
         return client, response.data["csrfToken"]
 
-    def test_csrf_is_required_for_login(self):
+    def request_code(self, client, token: str, phone: str) -> str:
+        with patch("chat.otp.send_sms") as send_sms:
+            response = client.post(
+                "/api/auth/otp/request/",
+                {"phone": phone},
+                format="json",
+                HTTP_X_CSRFTOKEN=token,
+            )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(send_sms.called)
+        message = send_sms.call_args.args[1]
+        match = re.search(r"\b(\d{6})\b", message)
+        self.assertIsNotNone(match)
+
+        return match.group(1)
+
+    def test_csrf_is_required_for_otp_request(self):
         client = APIClient(enforce_csrf_checks=True)
         denied = client.post(
-            "/api/auth/login/",
-            {"username": "awa", "password": TEST_PASSWORD},
+            "/api/auth/otp/request/",
+            {"phone": "+22376123456"},
             format="json",
         )
         self.assertEqual(denied.status_code, 403)
 
         token = client.get("/api/auth/csrf/").data["csrfToken"]
-        allowed = client.post(
-            "/api/auth/login/",
-            {"username": "awa", "password": TEST_PASSWORD},
-            format="json",
-            HTTP_X_CSRFTOKEN=token,
-        )
+        with patch("chat.otp.send_sms"):
+            allowed = client.post(
+                "/api/auth/otp/request/",
+                {"phone": "+22376123456"},
+                format="json",
+                HTTP_X_CSRFTOKEN=token,
+            )
         self.assertEqual(allowed.status_code, 200)
 
-    def test_registration_creates_session_and_validates_password(self):
+    def test_existing_user_logs_in_with_phone_and_otp(self):
         client, token = self.csrf_client()
+        code = self.request_code(client, token, "76 12 34 56")
 
-        weak = client.post(
-            "/api/auth/register/",
-            {
-                "username": "fatoumata",
-                "name": "Fatoumata Keïta",
-                "phone": "+22375086321",
-                "password": "court",
-            },
+        verified = client.post(
+            "/api/auth/otp/verify/",
+            {"phone": "+22376123456", "code": code},
             format="json",
             HTTP_X_CSRFTOKEN=token,
         )
-        self.assertEqual(weak.status_code, 400)
-        self.assertIn("password", weak.data)
-
-        created = client.post(
-            "/api/auth/register/",
-            {
-                "username": "fatoumata",
-                "name": "Fatoumata Keïta",
-                "phone": "+22375086321",
-                "password": "UnAutreMotDePasse2026!",
-            },
-            format="json",
-            HTTP_X_CSRFTOKEN=token,
-        )
-        self.assertEqual(created.status_code, 201)
-        self.assertTrue(User.objects.filter(username="fatoumata").exists())
+        self.assertEqual(verified.status_code, 200, verified.data)
+        self.assertEqual(verified.data["user"]["username"], "awa")
+        self.assertFalse(verified.data["isNewAccount"])
 
         me = client.get("/api/auth/me/")
         self.assertEqual(me.status_code, 200)
-        self.assertEqual(me.data["username"], "fatoumata")
+        self.assertEqual(me.data["username"], "awa")
 
-    def test_login_is_case_insensitive_and_logout_closes_session(self):
-        client, token = self.csrf_client()
-        response = client.post(
-            "/api/auth/login/",
-            {"username": "AWA", "password": TEST_PASSWORD},
-            format="json",
-            HTTP_X_CSRFTOKEN=token,
-        )
-        self.assertEqual(response.status_code, 200)
-
-        self.assertEqual(client.get("/api/auth/me/").status_code, 200)
         self.assertEqual(
             client.post(
                 "/api/auth/logout/",
-                HTTP_X_CSRFTOKEN=response.data["csrfToken"],
+                HTTP_X_CSRFTOKEN=verified.data["csrfToken"],
             ).status_code,
             204,
         )
         self.assertEqual(client.get("/api/auth/me/").status_code, 401)
 
-    def test_failed_logins_are_rate_limited(self):
+    def test_unknown_phone_creates_account_after_name(self):
         client, token = self.csrf_client()
-        statuses = []
+        code = self.request_code(client, token, "+22375086321")
 
-        for _ in range(10):
-            response = client.post(
-                "/api/auth/login/",
-                {"username": "awa", "password": "mauvais-mot-de-passe"},
-                format="json",
-                HTTP_X_CSRFTOKEN=token,
-            )
-            statuses.append(response.status_code)
-
-        self.assertEqual(statuses[:9], [400] * 9)
-        self.assertEqual(statuses[9], 429)
-
-        blocked = client.post(
-            "/api/auth/login/",
-            {"username": "awa", "password": TEST_PASSWORD},
+        needs_name = client.post(
+            "/api/auth/otp/verify/",
+            {"phone": "+22375086321", "code": code},
             format="json",
             HTTP_X_CSRFTOKEN=token,
         )
-        self.assertEqual(blocked.status_code, 429)
+        self.assertEqual(needs_name.status_code, 400)
+        self.assertTrue(needs_name.data["requiresName"])
+
+        created = client.post(
+            "/api/auth/otp/verify/",
+            {
+                "phone": "+22375086321",
+                "code": code,
+                "name": "Fatoumata Keïta",
+            },
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(created.status_code, 200, created.data)
+        self.assertTrue(created.data["isNewAccount"])
+        self.assertEqual(created.data["user"]["name"], "Fatoumata Keïta")
+
+        user = User.objects.get(phone="+22375086321")
+        self.assertTrue(user.username.startswith("nteri_"))
+        self.assertFalse(user.has_usable_password())
+
+    def test_wrong_code_is_rejected_and_limited(self):
+        client, token = self.csrf_client()
+        code = self.request_code(client, token, "+22376123456")
+        wrong_code = "000000" if code != "000000" else "111111"
+
+        for _ in range(5):
+            response = client.post(
+                "/api/auth/otp/verify/",
+                {"phone": "+22376123456", "code": wrong_code},
+                format="json",
+                HTTP_X_CSRFTOKEN=token,
+            )
+            self.assertEqual(response.status_code, 400)
+
+        valid_after_limit = client.post(
+            "/api/auth/otp/verify/",
+            {"phone": "+22376123456", "code": code},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(valid_after_limit.status_code, 400)
+        self.assertIsNotNone(OtpChallenge.objects.first().consumed_at)
+
+    def test_expired_code_is_rejected(self):
+        client, token = self.csrf_client()
+        code = self.request_code(client, token, "+22376123456")
+        OtpChallenge.objects.update(expires_at=timezone.now() - timedelta(seconds=1))
+
+        response = client.post(
+            "/api/auth/otp/verify/",
+            {"phone": "+22376123456", "code": code},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_otp_requests_are_rate_limited(self):
+        client, token = self.csrf_client()
+        statuses = []
+        with patch("chat.otp.send_sms"):
+            for _ in range(4):
+                statuses.append(
+                    client.post(
+                        "/api/auth/otp/request/",
+                        {"phone": "+22376123456"},
+                        format="json",
+                        HTTP_X_CSRFTOKEN=token,
+                    ).status_code
+                )
+
+        self.assertEqual(statuses[:3], [200, 200, 200])
+        self.assertEqual(statuses[3], 429)
 
     def test_anonymous_me_returns_401(self):
         self.assertEqual(APIClient().get("/api/auth/me/").status_code, 401)
@@ -178,6 +237,8 @@ class ChatApiTests(APITestCase):
         self.fatoumata = make_user(
             "fatoumata", "Fatoumata", "Keïta", "+22375086321"
         )
+        Contact.objects.create(owner=self.awa, contact=self.moussa)
+        Contact.objects.create(owner=self.awa, contact=self.fatoumata)
         self.conversation, _ = get_or_create_direct_conversation(
             self.awa,
             self.moussa,
@@ -261,36 +322,6 @@ class ChatApiTests(APITestCase):
             1,
         )
 
-    def test_direct_conversation_can_be_created_from_api(self):
-        response = self.client.post(
-            "/api/conversations/",
-            {"kind": "direct", "memberIds": [str(self.moussa.pk)]},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["id"], str(self.conversation.pk))
-
-        response = self.client.post(
-            "/api/conversations/",
-            {"kind": "direct", "memberIds": [str(self.fatoumata.pk)]},
-            format="json",
-        )
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data["kind"], "direct")
-        self.assertEqual(response.data["memberCount"], 2)
-        created = Conversation.objects.get(pk=response.data["id"])
-        self.assertEqual(created.participants.count(), 2)
-
-        invalid = self.client.post(
-            "/api/conversations/",
-            {
-                "kind": "direct",
-                "memberIds": [str(self.moussa.pk), str(self.fatoumata.pk)],
-            },
-            format="json",
-        )
-        self.assertEqual(invalid.status_code, 400)
-
     def test_group_requires_name_and_two_other_members(self):
         payload = {
             "kind": "group",
@@ -350,6 +381,219 @@ class ChatApiTests(APITestCase):
         ids = {contact["id"] for contact in response.data}
         self.assertNotIn(str(self.awa.pk), ids)
         self.assertIn(str(self.moussa.pk), ids)
+
+    def test_contacts_are_private_to_their_owner(self):
+        moussa_client = APIClient()
+        moussa_client.force_authenticate(self.moussa)
+
+        self.assertEqual(moussa_client.get("/api/contacts/").data, [])
+        self.assertIn(
+            str(self.moussa.pk),
+            {
+                contact["id"]
+                for contact in self.client.get("/api/contacts/").data
+            },
+        )
+
+    def test_contact_deletion_only_affects_own_book(self):
+        Contact.objects.create(owner=self.moussa, contact=self.awa)
+
+        response = self.client.delete(f"/api/contacts/{self.moussa.pk}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(
+            Contact.objects.filter(
+                owner=self.awa,
+                contact=self.moussa,
+            ).exists()
+        )
+        self.assertTrue(
+            Contact.objects.filter(
+                owner=self.moussa,
+                contact=self.awa,
+            ).exists()
+        )
+
+    def test_contact_can_be_added_by_phone(self):
+        oumar = make_user("oumar", "Oumar", "Sissoko", "+22366540933")
+
+        response = self.client.post(
+            "/api/contacts/",
+            {"phone": "66 54 09 33", "name": "Oumar du quartier"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["id"], str(oumar.pk))
+        self.assertEqual(response.data["name"], "Oumar du quartier")
+
+        again = self.client.post(
+            "/api/contacts/",
+            {"phone": "+22366540933"},
+            format="json",
+        )
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(again.data["name"], "Oumar du quartier")
+
+    def test_unknown_phone_and_self_cannot_be_added(self):
+        unknown = self.client.post(
+            "/api/contacts/",
+            {"phone": "+22399999999"},
+            format="json",
+        )
+        self.assertEqual(unknown.status_code, 404)
+
+        current = self.client.post(
+            "/api/contacts/",
+            {"phone": "+22376123456"},
+            format="json",
+        )
+        self.assertEqual(current.status_code, 400)
+
+    def test_conversation_creation_requires_a_saved_contact(self):
+        oumar = make_user("oumar", "Oumar", "Sissoko", "+22366540933")
+
+        direct = self.client.post(
+            "/api/conversations/",
+            {"kind": "direct", "memberIds": [str(oumar.pk)]},
+            format="json",
+        )
+        self.assertEqual(direct.status_code, 400)
+
+        group = self.client.post(
+            "/api/conversations/",
+            {
+                "kind": "group",
+                "name": "Groupe fermé",
+                "memberIds": [str(self.moussa.pk), str(oumar.pk)],
+            },
+            format="json",
+        )
+        self.assertEqual(group.status_code, 400)
+
+    @override_settings(VAPID_PUBLIC_KEY="", VAPID_PRIVATE_KEY="")
+    def test_push_config_is_disabled_without_keys(self):
+        response = self.client.get("/api/push/config/")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data["enabled"])
+        self.assertEqual(response.data["publicKey"], "")
+
+    @override_settings(
+        VAPID_PUBLIC_KEY="public-key",
+        VAPID_PRIVATE_KEY="private-key",
+    )
+    def test_push_config_exposes_public_key(self):
+        response = self.client.get("/api/push/config/")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data["enabled"])
+        self.assertEqual(response.data["publicKey"], "public-key")
+
+    def test_push_subscription_can_be_saved_and_removed(self):
+        payload = {
+            "endpoint": "https://fcm.googleapis.com/subscription/123",
+            "keys": {
+                "p256dh": "cle-publique-navigateur",
+                "auth": "secret-navigateur",
+            },
+        }
+        response = self.client.post(
+            "/api/push/subscribe/",
+            payload,
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.data)
+        subscription = PushSubscription.objects.get()
+        self.assertEqual(subscription.user, self.awa)
+        self.assertEqual(subscription.p256dh, "cle-publique-navigateur")
+
+        removed = self.client.post(
+            "/api/push/unsubscribe/",
+            {"endpoint": payload["endpoint"]},
+            format="json",
+        )
+        self.assertEqual(removed.status_code, 204)
+        self.assertFalse(PushSubscription.objects.exists())
+
+    def test_push_subscription_rejects_non_https_endpoint(self):
+        response = self.client.post(
+            "/api/push/subscribe/",
+            {
+                "endpoint": "http://push.example.com/subscription/123",
+                "keys": {"p256dh": "cle", "auth": "secret"},
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_push_subscription_rejects_unknown_push_host(self):
+        response = self.client.post(
+            "/api/push/subscribe/",
+            {
+                "endpoint": "https://example.com/subscription/123",
+                "keys": {"p256dh": "cle", "auth": "secret"},
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    @override_settings(
+        VAPID_PUBLIC_KEY="public-key",
+        VAPID_PRIVATE_KEY="private-key",
+    )
+    def test_push_is_sent_to_other_participants(self):
+        PushSubscription.objects.create(
+            user=self.moussa,
+            endpoint="https://fcm.googleapis.com/subscription/moussa",
+            p256dh="cle",
+            auth="secret",
+        )
+        PushSubscription.objects.create(
+            user=self.awa,
+            endpoint="https://fcm.googleapis.com/subscription/awa",
+            p256dh="cle",
+            auth="secret",
+        )
+
+        with patch("chat.push.webpush") as webpush:
+            create_message(self.conversation, self.awa, "Message notifié")
+
+        webpush.assert_called_once()
+        subscription_info = webpush.call_args.kwargs["subscription_info"]
+        self.assertEqual(
+            subscription_info["endpoint"],
+            "https://fcm.googleapis.com/subscription/moussa",
+        )
+
+    @override_settings(VAPID_PUBLIC_KEY="", VAPID_PRIVATE_KEY="")
+    def test_push_is_not_sent_without_vapid_keys(self):
+        PushSubscription.objects.create(
+            user=self.moussa,
+            endpoint="https://fcm.googleapis.com/subscription/moussa",
+            p256dh="cle",
+            auth="secret",
+        )
+
+        with patch("chat.push.webpush") as webpush:
+            create_message(self.conversation, self.awa, "Sans push")
+
+        webpush.assert_not_called()
+
+    @override_settings(
+        VAPID_PUBLIC_KEY="public-key",
+        VAPID_PRIVATE_KEY="private-key",
+    )
+    def test_logout_removes_push_subscriptions(self):
+        PushSubscription.objects.create(
+            user=self.awa,
+            endpoint="https://fcm.googleapis.com/subscription/awa",
+            p256dh="cle",
+            auth="secret",
+        )
+
+        self.assertEqual(
+            self.client.post("/api/auth/logout/").status_code,
+            204,
+        )
+        self.assertFalse(PushSubscription.objects.exists())
 
     def test_contacts_endpoint_is_rate_limited(self):
         responses = [self.client.get("/api/contacts/") for _ in range(121)]

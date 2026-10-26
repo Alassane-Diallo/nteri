@@ -9,6 +9,7 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
 from .models import Conversation, ConversationParticipant, Message, User
+from .push import send_push_for_message
 from .serializers import ConversationSerializer, MessageSerializer
 
 logger = logging.getLogger(__name__)
@@ -233,6 +234,14 @@ def create_message(
             "Diffusion impossible du message %s de la conversation %s.",
             message.pk,
             conversation.pk,
+        )
+
+    try:
+        send_push_for_message(conversation, sender, message)
+    except Exception:
+        logger.exception(
+            "Notifications Push impossibles pour le message %s.",
+            message.pk,
         )
 
     return message

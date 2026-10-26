@@ -1,14 +1,14 @@
 import { BrandMark } from "~/components/BrandMark";
-import { LockIcon, MessageIcon, PlusIcon } from "~/components/icons";
+import { LockIcon, PlusIcon, UserPlusIcon } from "~/components/icons";
 
 interface WelcomePanelProps {
-  onCreateDiscussion: () => void;
   onCreateGroup: () => void;
+  onOpenContacts: () => void;
 }
 
 export function WelcomePanel({
-  onCreateDiscussion,
   onCreateGroup,
+  onOpenContacts,
 }: WelcomePanelProps) {
   return (
     <section
@@ -34,29 +34,29 @@ export function WelcomePanel({
         </p>
 
         <h1 className="mt-3 font-display text-[32px] font-semibold leading-[1.08] tracking-[-0.045em] text-ink sm:text-[38px]">
-          La conversation,
+          Vos contacts,
           <br />
-          simplement.
+          vos conversations.
         </h1>
 
         <p className="mt-4 max-w-md text-[13.5px] leading-relaxed text-ink-soft">
-          Retrouvez vos proches, lancez une discussion et créez vos groupes. Vos
-          conversations sont synchronisées et protégées.
+          Ouvrez votre carnet privé pour retrouver vos proches, ou créez un
+          groupe avec les personnes que vous avez déjà enregistrées.
         </p>
 
-        <div className="mt-7 flex w-full max-w-sm flex-col items-stretch justify-center gap-2 sm:flex-row sm:items-center">
+        <div className="mt-7 flex flex-col items-center gap-2 sm:flex-row">
           <button
             type="button"
-            onClick={onCreateDiscussion}
-            className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-line bg-surface px-5 text-[13px] font-semibold text-ink shadow-sm transition duration-200 hover:bg-surface-muted active:scale-[0.98]"
+            onClick={onOpenContacts}
+            className="button-brand inline-flex h-12 items-center gap-2 rounded-full px-5 text-[13px] font-semibold shadow-sm transition duration-200 hover:brightness-110 active:scale-[0.98]"
           >
-            <MessageIcon className="size-4" />
-            Nouvelle discussion
+            <UserPlusIcon className="size-4" />
+            Ouvrir mes contacts
           </button>
           <button
             type="button"
             onClick={onCreateGroup}
-            className="button-brand inline-flex h-12 items-center justify-center gap-2 rounded-full px-5 text-[13px] font-semibold shadow-sm transition duration-200 hover:brightness-110 active:scale-[0.98]"
+            className="inline-flex h-12 items-center gap-2 rounded-full border border-line bg-surface px-5 text-[13px] font-semibold text-ink-soft shadow-sm transition duration-200 hover:bg-surface-muted hover:text-ink active:scale-[0.98]"
           >
             <PlusIcon className="size-4" />
             Créer un groupe
@@ -65,7 +65,7 @@ export function WelcomePanel({
 
         <div className="mt-8 inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1.5 text-[10px] font-medium text-muted">
           <LockIcon className="size-3.5" />
-          Connexion sécurisée par session
+          Carnet de contacts privé et session sécurisée
         </div>
 
         <div className="mt-10 flex items-center gap-2">

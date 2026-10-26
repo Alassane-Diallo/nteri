@@ -103,6 +103,21 @@ URL TLS `rediss://`.
 | `REDIS_URL` | URL Upstash Redis TLS (`rediss://`) |
 | `DB_CONN_MAX_AGE` | `0` (automatique pour un pooler) |
 | `PYTHON_VERSION` | `3.14` |
+| `NTERI_SMS_BACKEND` | **Obligatoire en production** : `twilio` ou `http` |
+| `TWILIO_ACCOUNT_SID` | Identifiant Twilio si `NTERI_SMS_BACKEND=twilio` |
+| `TWILIO_AUTH_TOKEN` | Jeton Twilio si `NTERI_SMS_BACKEND=twilio` |
+| `TWILIO_FROM_NUMBER` | Numéro expéditeur Twilio au format international |
+| `NTERI_SMS_WEBHOOK_URL` | URL HTTPS de la passerelle SMS si `NTERI_SMS_BACKEND=http` |
+| `NTERI_SMS_WEBHOOK_TOKEN` | Jeton facultatif de la passerelle HTTP |
+| `NTERI_VAPID_PUBLIC_KEY` | Clé publique VAPID pour Web Push |
+| `NTERI_VAPID_PRIVATE_KEY` | Clé privée VAPID conservée côté serveur |
+| `NTERI_VAPID_SUBJECT` | Contact VAPID, par exemple `mailto:contact@nteri.app` |
+| `NTERI_PUSH_ALLOWED_HOSTS` | Facultatif : suffixes Push autorisés, valeurs par défaut FCM/Mozilla/Apple/Windows |
+
+Sans passerelle SMS configurée, `NTERI_SMS_BACKEND=console` est refusé dès que
+`DJANGO_DEBUG=False` : les demandes OTP renvoient `503` et la connexion est
+impossible. Ne déployez pas cette version en production avant d’avoir configuré
+Twilio ou la passerelle HTTP.
 
 Les alias stables `nteri.vercel.app` et
 `nteri-alassane-diallos-projects-6b5efa42.vercel.app` sont ajoutés
@@ -131,6 +146,12 @@ Le build du service backend exécute `collectstatic` puis `migrate`. WhiteNoise
 sert ensuite `/static/` (admin inclus) depuis l’application ASGI. Le service
 frontend exécute `npm run build`.
 
+> **Migrations de production** : le build applique automatiquement les
+> migrations `0003` à `0005` (OTP, contacts privés et Web Push). Sauvegardez la
+> base Supabase avant le premier déploiement de cette version. La migration
+> normalise les numéros de téléphone et remplit les carnets de contacts à
+> partir des conversations existantes.
+
 Si Supabase est hébergé en `eu-west-3`, choisissez la région Vercel `cdg1`
 (Paris) dans **Settings → Functions → Region** pour limiter la latence.
 
@@ -138,7 +159,8 @@ Si Supabase est hébergé en `eu-west-3`, choisissez la région Vercel `cdg1`
 
 - `GET https://<domaine>/api/auth/csrf/` renvoie un JSON avec un jeton ;
 - `https://<domaine>/admin/` affiche la page de connexion avec son CSS ;
-- l’inscription et la connexion fonctionnent ;
+- la demande OTP envoie un vrai SMS et la vérification ouvre une session ;
+- `GET https://<domaine>/api/push/config/` indique si Web Push est activé ;
 - dans les outils développeur, `wss://<domaine>/ws/inbox/` répond `101` ;
 - deux navigateurs différents échangent des messages en temps réel.
 
