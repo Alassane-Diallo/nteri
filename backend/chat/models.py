@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.db.models import F, Q
+from django.db.models.functions import Lower
 from django.utils import timezone
 
 
@@ -16,6 +17,20 @@ class User(AbstractUser):
     phone = models.CharField(max_length=24, unique=True, null=True, blank=True)
     avatar = models.URLField(blank=True, default="")
     last_seen = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                Lower("email"),
+                condition=~Q(email=""),
+                name="unique_user_email_ci",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.email:
+            self.email = self.email.strip().lower()
+        super().save(*args, **kwargs)
 
     @property
     def display_name(self) -> str:
@@ -101,7 +116,17 @@ class PushSubscription(models.Model):
 class OtpChallenge(models.Model):
     """Code OTP à usage unique, stocké uniquement sous forme hachée."""
 
+    class Channel(models.TextChoices):
+        SMS = "sms", "SMS"
+        EMAIL = "email", "Email"
+
     phone = models.CharField(max_length=24, db_index=True)
+    email = models.EmailField(blank=True, default="", db_index=True)
+    channel = models.CharField(
+        max_length=10,
+        choices=Channel.choices,
+        default=Channel.SMS,
+    )
     code_hash = models.CharField(max_length=128)
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
@@ -117,7 +142,9 @@ class OtpChallenge(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"OTP {self.phone} ({'consommé' if self.consumed_at else 'actif'})"
+        destination = self.email or self.phone
+
+        return f"OTP {destination} ({'consommé' if self.consumed_at else 'actif'})"
 
 
 class Conversation(models.Model):

@@ -2,7 +2,7 @@
 
 N’Teri is a French-language, text-only messaging app: React Router 8 Framework
 Mode with SSR, React 19, Vite 8, Tailwind CSS 4, strict TypeScript, backed by
-Django 6.1 + Django REST Framework + Channels in `../backend`. All
+Django 6.1 + Django REST Framework + Channels in `../py/nteri-api`. All
 user-facing copy is French; keep it that way.
 
 ## Commands
@@ -17,7 +17,7 @@ Frontend (this directory):
 - `npm start` — serves the production build on port `3000` (`PORT` overrides).
   It does not proxy to Django; production needs a same-origin reverse proxy.
 
-Backend (`../backend`):
+Backend (`../py/nteri-api`):
 
 - `python manage.py runserver 127.0.0.1:8000` — start the API/WebSocket server.
 - `python manage.py test chat -v 2` — auth, permissions, messaging, pagination,
@@ -26,9 +26,11 @@ Backend (`../backend`):
   `python manage.py makemigrations --check --dry-run` — configuration and
   migration checks.
 - `python manage.py seed_demo --reset --reset-passwords` — reset demo data.
-  Demo accounts sign in with their seeded phone number and an OTP; the seeded
-  Django password (`NteriDemo2026!` unless `NTERI_DEMO_PASSWORD` is set) is for
-  the admin only.
+  Demo accounts sign in with their seeded phone number, then an email that
+  receives the OTP; the seeded Django password (`NteriDemo2026!` unless
+  `NTERI_DEMO_PASSWORD` is set) is for the admin only.
+- `python manage.py set_user_email <phone> <email>` — associate an email with
+  an existing account when email OTP enrollment is disabled in production.
 
 Verify changes with frontend `npm run typecheck && npm run build` and backend
 `python manage.py check && python manage.py test chat`. There is no lint script.
@@ -62,12 +64,17 @@ Verify changes with frontend `npm run typecheck && npm run build` and backend
 - Scope is text messages and group creation only. Groups require a name of at
   least 2 characters and at least 2 selected contacts. Do not add media, calls,
   attachments or message editing without an explicit request.
-- Authentication is phone + OTP. Password login/registration endpoints were
-  removed from the app API; Django admin passwords are only for staff. OTP
-  codes must stay hashed, short-lived and rate-limited.
-- SMS and Web Push are configuration-dependent. `console` SMS is development
-  only; production needs `twilio` or `http`. Web Push needs VAPID keys and
-  HTTPS; local notifications remain the fallback when it is disabled.
+- Authentication is phone + OTP. The phone remains the unique identifier; the
+  current OTP channel is email (Resend in production) while no production SMS
+  gateway is available. Password login/registration endpoints were removed
+  from the app API; Django admin passwords are only for staff. OTP codes must
+  stay hashed, short-lived and rate-limited.
+- Email OTP is configuration-dependent: `console` is development only and
+  `resend` needs `RESEND_API_KEY` plus a verified `RESEND_FROM_EMAIL`. Existing
+  accounts must already have the matching email; only DEBUG may enroll one.
+  SMS remains optional via `NTERI_OTP_CHANNEL=sms` with `twilio` or `http`.
+  Web Push needs VAPID keys and HTTPS; local notifications remain the fallback
+  when it is disabled.
 - `app/app.css` is the design system: Mali palette tokens, dark-mode token
   overrides, typography, patterns and motion. Tailwind v4 is configured in CSS;
   there is no `tailwind.config.*`.
@@ -90,10 +97,16 @@ Verify changes with frontend `npm run typecheck && npm run build` and backend
   backend must keep contact queries scoped to `request.user` and only expose
   profiles through the caller's contact book or shared conversations.
 - OTP codes must never be returned or logged outside DEBUG, and must remain
-  hashed with attempt and request throttling. Production SMS must use a real
-  provider; never allow `console` SMS when `DEBUG=False`.
-- VAPID private keys and SMS credentials stay server-side. Only the VAPID
-  public key may be returned to the browser.
+  hashed with attempt and request throttling. Production email must use Resend
+  with a verified domain; never allow `console` email when `DEBUG=False`.
+  Production SMS, if enabled, must use a real provider.
+- An existing account may only receive an email OTP at the address already
+  stored on that account. Never let an anonymous request attach or change the
+  email of an existing account outside DEBUG. Enforce email uniqueness.
+- Email OTP does not prove phone ownership; treat it as a temporary channel and
+  do not present it as equivalent to SMS verification.
+- VAPID private keys, Resend keys and SMS credentials stay server-side. Only
+  the VAPID public key may be returned to the browser.
 - Do not reintroduce hardcoded credentials, secrets, API keys or production
   hostnames. Demo credentials belong only to the seed command and DEV UI.
 - Keep `danger` messages user-safe: no stack traces, internal URLs or raw

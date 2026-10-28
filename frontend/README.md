@@ -5,13 +5,14 @@ carnet de contacts privé, conversations directes et groupes.
 
 Le projet est composé de deux applications :
 
-- ce frontend React Router dans `frontend/` ;
-- l’API Django dans `backend/`.
+- ce frontend React Router dans `demo/nteri` ;
+- l’API Django dans `demo/py/nteri-api`.
 
 ## Fonctionnalités
 
-- Connexion par numéro de téléphone et code OTP
-- Création de compte automatique après vérification d’un nouveau numéro
+- Connexion par numéro de téléphone et code OTP envoyé par email
+- Création de compte automatique après vérification du code sur un nouveau
+  numéro
 - Carnet de contacts privé : chaque personne ne voit que ses propres contacts
 - Conversations directes avec une personne de son carnet
 - Groupes avec un nom et au moins deux contacts
@@ -36,7 +37,7 @@ Le projet est composé de deux applications :
 Le frontend a besoin de l’API pour fonctionner. Dans un premier terminal :
 
 ```bash
-cd ../backend
+cd ../py/nteri-api
 source .venv/bin/activate
 python manage.py migrate
 python manage.py seed_demo
@@ -63,9 +64,12 @@ NTERI_BACKEND_URL=http://127.0.0.1:8000 npm run dev
 
 ### Comptes de démonstration
 
-Après `seed_demo`, la connexion se fait avec le numéro de téléphone. En
-développement, le code OTP est affiché dans l’interface ou dans les logs
-Django selon `NTERI_EXPOSE_OTP`.
+Après `seed_demo`, la connexion se fait avec le numéro de téléphone, puis une
+adresse email qui reçoit le code OTP. En développement, n’importe quelle
+adresse email valide peut être associée à un compte de démonstration lors de
+sa première connexion ; le code est affiché dans l’interface ou dans les logs
+Django selon `NTERI_EXPOSE_OTP`. En production, l’email doit déjà être associé
+au compte par un administrateur.
 
 | Nom | Téléphone |
 | --- | --- |
@@ -118,7 +122,7 @@ Le déploiement sur une même origine reste fortement recommandé.
 app/
 ├── components/                 # Briques visuelles partagées (avatar, icônes, logo)
 ├── features/auth/
-│   └── AuthScreen.tsx          # Connexion par téléphone et code OTP
+│   └── AuthScreen.tsx          # Connexion téléphone → email → code OTP
 ├── features/messaging/
 │   ├── api.ts                  # Client REST, CSRF, session, Push et WebSocket
 │   ├── components/             # Liste, conversation, composeur, contacts, groupe
@@ -162,12 +166,8 @@ Le périmètre actuel couvre les messages texte, les contacts privés et la
 création de groupes. Les médias, appels et pièces jointes ne sont pas pris en
 charge.
 
-## Vercel
+## Docker
 
-Le dépôt de déploiement utilise un seul projet Vercel avec deux services :
-le frontend est servi sur `/`, l’API sur `/api` et `/ws`. Le frontend et l’API
-partagent donc la même origine.
-
-Laissez `VITE_API_URL` et `VITE_WS_URL` vides en production : le client utilise
-les chemins relatifs et `window.location.origin`. La configuration complète du
-déploiement se trouve dans le `README.md` à la racine du dépôt de déploiement.
+Le `Dockerfile` fournit uniquement le frontend. En production, placez-le
+derrière le même reverse proxy que l’API Django et assurez la terminaison
+HTTPS.

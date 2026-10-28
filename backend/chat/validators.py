@@ -48,6 +48,16 @@ def normalize_message_body(value: str) -> str:
     return normalized
 
 
+def normalize_email(value: str) -> str:
+    normalized = value.strip().lower()
+    if len(normalized) > 254:
+        raise serializers.ValidationError(
+            "L’adresse email ne doit pas dépasser 254 caractères."
+        )
+
+    return normalized
+
+
 def normalize_phone(value: str) -> str:
     raw = value.strip()
     if not raw or not PHONE_ALLOWED.fullmatch(raw):

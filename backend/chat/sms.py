@@ -6,12 +6,14 @@ from typing import Final
 import requests
 from django.conf import settings
 
+from .delivery import OtpDeliveryError
+
 logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT: Final = 10
 
 
-class SmsDeliveryError(RuntimeError):
+class SmsDeliveryError(OtpDeliveryError):
     """Erreur d'envoi SMS sans exposer les détails du fournisseur."""
 
 

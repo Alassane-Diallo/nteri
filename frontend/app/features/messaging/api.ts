@@ -68,6 +68,7 @@ export interface OtpRequestResponse {
 
 export interface OtpVerifyPayload {
   phone: string;
+  email: string;
   code: string;
   name?: string;
 }
@@ -288,10 +289,10 @@ export const authApi = {
     return request<ApiUser>("/api/auth/me/");
   },
 
-  async requestOtp(phone: string): Promise<OtpRequestResponse> {
+  async requestOtp(phone: string, email: string): Promise<OtpRequestResponse> {
     return request<OtpRequestResponse>("/api/auth/otp/request/", {
       method: "POST",
-      body: { phone },
+      body: { phone, email },
     });
   },
 

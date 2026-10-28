@@ -335,11 +335,11 @@ export function useChatStore(activeChatId: string | null) {
   ]);
 
   const requestOtp = useCallback(
-    async (phone: string): Promise<OtpRequestResponse | null> => {
+    async (phone: string, email: string): Promise<OtpRequestResponse | null> => {
       setBusy(true);
       setError(null);
       try {
-        return await authApi.requestOtp(phone);
+        return await authApi.requestOtp(phone, email);
       } catch (failure) {
         setError(handleFailure(failure));
 

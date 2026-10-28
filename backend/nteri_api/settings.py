@@ -379,6 +379,39 @@ SMS_WEBHOOK_TOKEN = os.getenv("NTERI_SMS_WEBHOOK_TOKEN", "").strip()
 # Le code OTP ne doit jamais être renvoyé au client hors développement.
 EXPOSE_OTP = DEBUG and env_bool("NTERI_EXPOSE_OTP", True)
 
+# --- Authentification par email OTP ----------------------------------------
+# Le téléphone reste l'identifiant unique du compte. L'email sert uniquement
+# de canal de réception du code tant qu'aucune passerelle SMS de production
+# n'est disponible.
+OTP_CHANNEL = os.getenv("NTERI_OTP_CHANNEL", "email").strip().lower()
+if OTP_CHANNEL not in {"email", "sms"}:
+    raise RuntimeError("NTERI_OTP_CHANNEL doit valoir 'email' ou 'sms'.")
+
+# En développement, `console` écrit le code dans les logs. En production,
+# utilisez impérativement `resend` avec une clé API et un domaine vérifié.
+OTP_EMAIL_BACKEND = os.getenv(
+    "NTERI_EMAIL_BACKEND",
+    "console" if DEBUG else "resend",
+).strip().lower()
+if OTP_EMAIL_BACKEND not in {"console", "resend"}:
+    raise RuntimeError("NTERI_EMAIL_BACKEND doit valoir 'console' ou 'resend'.")
+
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+RESEND_FROM_EMAIL = os.getenv("RESEND_FROM_EMAIL", "").strip()
+RESEND_FROM_NAME = os.getenv("RESEND_FROM_NAME", "N’Teri").strip()
+RESEND_API_URL = os.getenv(
+    "RESEND_API_URL",
+    "https://api.resend.com/emails",
+).strip()
+
+# Autorise un compte existant sans email à associer l'adresse vérifiée lors de
+# sa première connexion. À réserver au développement : en production, un
+# administrateur doit renseigner l'email d'un compte existant.
+EMAIL_OTP_ALLOW_ENROLLMENT = env_bool(
+    "NTERI_EMAIL_OTP_ALLOW_ENROLLMENT",
+    DEBUG,
+)
+
 # --- Notifications Web Push -------------------------------------------------
 # Générez une paire de clés VAPID et renseignez les deux variables pour
 # activer les notifications lorsque l’application est fermée. Sans clés,

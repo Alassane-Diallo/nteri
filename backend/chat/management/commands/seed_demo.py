@@ -141,8 +141,9 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS("Données de démonstration prêtes."))
         self.stdout.write(
-            "Connexion : +223 76 12 34 56 (code OTP ; en développement, "
-            "le code est affiché par le serveur)."
+            "Connexion : +223 76 12 34 56, puis une adresse email pour "
+            "recevoir le code OTP (en développement, le code est affiché par "
+            "le serveur)."
         )
 
     def _create_users(self, reset_passwords: bool) -> dict[str, User]:

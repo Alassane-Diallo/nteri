@@ -8,8 +8,10 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.db import transaction
 from django.utils import timezone
 
+from .delivery import OtpDeliveryError
+from .email import send_otp_email
 from .models import OtpChallenge
-from .sms import SmsDeliveryError, send_sms
+from .sms import send_sms
 
 OTP_CODE_LENGTH = 6
 OTP_MAX_ATTEMPTS = 5
@@ -18,7 +20,7 @@ OTP_TTL_SECONDS = 300
 __all__ = [
     "OTP_MAX_ATTEMPTS",
     "OTP_TTL_SECONDS",
-    "SmsDeliveryError",
+    "OtpDeliveryError",
     "consume_challenge",
     "issue_challenge",
     "verify_challenge",
@@ -40,8 +42,18 @@ def _message_for(code: str) -> str:
     )
 
 
-def issue_challenge(phone: str) -> tuple[OtpChallenge, str]:
-    """Invalide les anciens codes puis envoie un nouveau code à ``phone``."""
+def issue_challenge(
+    phone: str,
+    *,
+    email: str = "",
+    channel: str = OtpChallenge.Channel.SMS,
+) -> tuple[OtpChallenge, str]:
+    """Invalide les anciens codes puis envoie un nouveau code."""
+
+    if channel not in OtpChallenge.Channel.values:
+        raise ValueError("Canal OTP inconnu.")
+    if channel == OtpChallenge.Channel.EMAIL and not email:
+        raise ValueError("Une adresse email est requise pour un OTP par email.")
 
     now = timezone.now()
     code = _generate_code()
@@ -52,13 +64,22 @@ def issue_challenge(phone: str) -> tuple[OtpChallenge, str]:
         ).update(consumed_at=now)
         challenge = OtpChallenge.objects.create(
             phone=phone,
+            email=email,
+            channel=channel,
             code_hash=make_password(code),
             expires_at=now + timedelta(seconds=OTP_TTL_SECONDS),
         )
 
     try:
-        send_sms(phone, _message_for(code))
-    except SmsDeliveryError:
+        if channel == OtpChallenge.Channel.EMAIL:
+            send_otp_email(
+                email,
+                code,
+                ttl_seconds=OTP_TTL_SECONDS,
+            )
+        else:
+            send_sms(phone, _message_for(code))
+    except OtpDeliveryError:
         challenge.delete()
         raise
 

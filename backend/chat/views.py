@@ -20,7 +20,7 @@ from rest_framework.views import APIView
 from .models import Contact, Message, OtpChallenge, PushSubscription, User
 from .otp import (
     OTP_TTL_SECONDS,
-    SmsDeliveryError,
+    OtpDeliveryError,
     consume_challenge,
     dev_code_enabled,
     issue_challenge,
@@ -63,6 +63,41 @@ OTP_REQUEST_WINDOW = 60 * 10
 OTP_REQUEST_BLOCK = 60 * 15
 OTP_REQUEST_IP_LIMIT = 10
 OTP_VERIFY_IP_LIMIT = 20
+OTP_REQUEST_EMAIL_LIMIT = 3
+
+
+def otp_channel() -> str:
+    return getattr(settings, "OTP_CHANNEL", OtpChallenge.Channel.EMAIL).strip().lower()
+
+
+def email_enrollment_allowed() -> bool:
+    return bool(getattr(settings, "EMAIL_OTP_ALLOW_ENROLLMENT", False))
+
+
+def otp_request_payload(code: str | None = None) -> dict:
+    if otp_channel() == OtpChallenge.Channel.EMAIL:
+        detail = (
+            "Si ces informations correspondent à un compte, un code de "
+            "connexion vient d’être envoyé à cette adresse email."
+        )
+    else:
+        detail = (
+            "Si ce numéro peut recevoir des SMS, un code de connexion vient "
+            "d’être envoyé."
+        )
+
+    payload = {"detail": detail, "expiresIn": OTP_TTL_SECONDS}
+    if code and dev_code_enabled():
+        payload["devCode"] = code
+
+    return payload
+
+
+def invalid_otp_response() -> Response:
+    return Response(
+        {"detail": "Code expiré ou invalide. Demandez un nouveau code."},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
 
 
 def csrf_failure(request, reason: str = "") -> JsonResponse:
@@ -123,10 +158,23 @@ class OtpRequestView(APIView):
         serializer = OtpRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         phone = serializer.validated_data["phone"]
+        email = serializer.validated_data.get("email", "") or ""
+        channel = otp_channel()
         ip = client_ip(request)
+
+        if channel == OtpChallenge.Channel.EMAIL and not email:
+            return Response(
+                {"email": ["Indiquez une adresse email."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if channel == OtpChallenge.Channel.SMS:
+            email = ""
 
         assert_not_blocked("otp-request-ip", ip)
         assert_not_blocked("otp-request-phone", phone)
+        if email:
+            assert_not_blocked("otp-request-email", email)
+
         record_attempt(
             "otp-request-ip",
             ip,
@@ -143,10 +191,59 @@ class OtpRequestView(APIView):
             block_seconds=OTP_REQUEST_BLOCK,
             enforce=False,
         )
+        if email:
+            record_attempt(
+                "otp-request-email",
+                email,
+                limit=OTP_REQUEST_EMAIL_LIMIT,
+                window_seconds=OTP_REQUEST_WINDOW,
+                block_seconds=OTP_REQUEST_BLOCK,
+                enforce=False,
+            )
+
+        user = User.objects.filter(phone=phone, is_active=True).first()
+        stored_email = (user.email or "").strip().lower() if user else ""
+
+        if channel == OtpChallenge.Channel.EMAIL:
+            if user is not None:
+                # Ne jamais envoyer un code à une autre adresse que celle du
+                # compte : sinon un numéro connu suffirait à prendre le compte.
+                if stored_email and stored_email != email:
+                    return Response(otp_request_payload())
+                if not stored_email and not email_enrollment_allowed():
+                    return Response(otp_request_payload())
+                if (
+                    not stored_email
+                    and email_enrollment_allowed()
+                    and User.objects.filter(email__iexact=email)
+                    .exclude(pk=user.pk)
+                    .exists()
+                ):
+                    return Response(
+                        {
+                            "email": [
+                                "Cette adresse email est déjà associée à un compte."
+                            ]
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            elif User.objects.filter(email__iexact=email).exists():
+                return Response(
+                    {
+                        "email": [
+                            "Cette adresse email est déjà associée à un compte."
+                        ]
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         try:
-            _, code = issue_challenge(phone)
-        except SmsDeliveryError:
+            _, code = issue_challenge(
+                phone,
+                email=email,
+                channel=channel,
+            )
+        except OtpDeliveryError:
             return Response(
                 {
                     "detail": (
@@ -157,17 +254,7 @@ class OtpRequestView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        payload = {
-            "detail": (
-                "Si ce numéro peut recevoir des SMS, "
-                "un code de connexion vient d’être envoyé."
-            ),
-            "expiresIn": OTP_TTL_SECONDS,
-        }
-        if dev_code_enabled():
-            payload["devCode"] = code
-
-        return Response(payload)
+        return Response(otp_request_payload(code))
 
 
 @method_decorator(csrf_protect, name="dispatch")
@@ -180,20 +267,30 @@ class OtpVerifyView(APIView):
         serializer.is_valid(raise_exception=True)
 
         phone = serializer.validated_data["phone"]
+        email = serializer.validated_data.get("email", "") or ""
         code = serializer.validated_data["code"]
         name = serializer.validated_data["name"]
+        channel = otp_channel()
         ip = client_ip(request)
 
-        assert_not_blocked("otp-verify-ip", ip)
-        challenge = (
-            OtpChallenge.objects.filter(
-                phone=phone,
-                consumed_at__isnull=True,
-                expires_at__gt=timezone.now(),
+        if channel == OtpChallenge.Channel.EMAIL and not email:
+            return Response(
+                {"email": ["Indiquez une adresse email."]},
+                status=status.HTTP_400_BAD_REQUEST,
             )
-            .order_by("-created_at")
-            .first()
+        if channel == OtpChallenge.Channel.SMS:
+            email = ""
+
+        assert_not_blocked("otp-verify-ip", ip)
+        challenges = OtpChallenge.objects.filter(
+            phone=phone,
+            channel=channel,
+            consumed_at__isnull=True,
+            expires_at__gt=timezone.now(),
         )
+        if channel == OtpChallenge.Channel.EMAIL:
+            challenges = challenges.filter(email=email)
+        challenge = challenges.order_by("-created_at").first()
 
         if challenge is None or not verify_challenge(challenge, code):
             record_attempt(
@@ -204,13 +301,34 @@ class OtpVerifyView(APIView):
                 block_seconds=OTP_REQUEST_BLOCK,
                 enforce=False,
             )
-            return Response(
-                {"detail": "Code expiré ou invalide. Demandez un nouveau code."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return invalid_otp_response()
 
         user = User.objects.filter(phone=phone, is_active=True).first()
         created = False
+
+        if user is not None and channel == OtpChallenge.Channel.EMAIL:
+            stored_email = (user.email or "").strip().lower()
+            if stored_email and stored_email != email:
+                consume_challenge(challenge)
+                return invalid_otp_response()
+            if not stored_email and not email_enrollment_allowed():
+                consume_challenge(challenge)
+                return invalid_otp_response()
+            if (
+                not stored_email
+                and User.objects.filter(email__iexact=email)
+                .exclude(pk=user.pk)
+                .exists()
+            ):
+                consume_challenge(challenge)
+                return Response(
+                    {
+                        "email": [
+                            "Cette adresse email est déjà associée à un compte."
+                        ]
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         if user is None:
             if not name:
@@ -235,6 +353,7 @@ class OtpVerifyView(APIView):
                     user = User.objects.create_user(
                         username=username_for_phone(phone),
                         phone=phone,
+                        email=email if channel == OtpChallenge.Channel.EMAIL else "",
                         first_name=first_name,
                         last_name=last_name,
                     )
@@ -242,6 +361,21 @@ class OtpVerifyView(APIView):
             except IntegrityError:
                 user = User.objects.filter(phone=phone, is_active=True).first()
                 if user is None:
+                    consume_challenge(challenge)
+                    if (
+                        channel == OtpChallenge.Channel.EMAIL
+                        and User.objects.filter(email__iexact=email).exists()
+                    ):
+                        return Response(
+                            {
+                                "email": [
+                                    "Cette adresse email est déjà associée "
+                                    "à un compte."
+                                ]
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
                     return Response(
                         {
                             "detail": (
@@ -251,11 +385,36 @@ class OtpVerifyView(APIView):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
+                if channel == OtpChallenge.Channel.EMAIL:
+                    stored_email = (user.email or "").strip().lower()
+                    if stored_email and stored_email != email:
+                        consume_challenge(challenge)
+                        return invalid_otp_response()
+
+        if (
+            user is not None
+            and channel == OtpChallenge.Channel.EMAIL
+            and not (user.email or "").strip()
+        ):
+            if not email_enrollment_allowed():
+                consume_challenge(challenge)
+                return invalid_otp_response()
+            user.email = email
+            try:
+                user.save(update_fields=["email"])
+            except IntegrityError:
+                consume_challenge(challenge)
+                return Response(
+                    {
+                        "email": [
+                            "Cette adresse email est déjà associée à un compte."
+                        ]
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         if not consume_challenge(challenge):
-            return Response(
-                {"detail": "Code expiré ou invalide. Demandez un nouveau code."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            return invalid_otp_response()
 
         login(
             request,
@@ -265,6 +424,8 @@ class OtpVerifyView(APIView):
         touch_last_seen(user)
 
         clear_attempts("otp-request-phone", phone)
+        if email:
+            clear_attempts("otp-request-email", email)
         clear_attempts("otp-request-ip", ip)
         clear_attempts("otp-verify-ip", ip)
 

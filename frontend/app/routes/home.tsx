@@ -53,7 +53,6 @@ export default function Home() {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [isGroupDialogOpen, setIsGroupDialogOpen] = useState(false);
   const [isContactsDialogOpen, setIsContactsDialogOpen] = useState(false);
-  const [needsName, setNeedsName] = useState(false);
 
   const {
     status,
@@ -125,12 +124,6 @@ export default function Home() {
 
     markRead(activeChatId);
   }, [activeChatId, activeMessages.length, markRead]);
-
-  useEffect(() => {
-    if (status === "anonymous") {
-      setNeedsName(false);
-    }
-  }, [status]);
 
   useEffect(() => {
     const openKnownChat = (chatId?: string) => {
@@ -205,20 +198,8 @@ export default function Home() {
       <AuthScreen
         busy={busy}
         error={error}
-        needsName={needsName}
-        onRequestOtp={async (phone) => {
-          setNeedsName(false);
-
-          return requestOtp(phone);
-        }}
-        onVerifyOtp={async (payload) => {
-          const result = await verifyOtp(payload);
-          if (result === "requires-name") {
-            setNeedsName(true);
-          }
-
-          return result;
-        }}
+        onRequestOtp={requestOtp}
+        onVerifyOtp={verifyOtp}
       />
     );
   }

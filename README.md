@@ -103,7 +103,13 @@ URL TLS `rediss://`.
 | `REDIS_URL` | URL Upstash Redis TLS (`rediss://`) |
 | `DB_CONN_MAX_AGE` | `0` (automatique pour un pooler) |
 | `PYTHON_VERSION` | `3.14` |
-| `NTERI_SMS_BACKEND` | **Obligatoire en production** : `twilio` ou `http` |
+| `NTERI_OTP_CHANNEL` | `email` (canal par défaut) ou `sms` |
+| `NTERI_EMAIL_BACKEND` | **Obligatoire en production** : `resend` |
+| `RESEND_API_KEY` | Clé API Resend, conservée côté serveur |
+| `RESEND_FROM_EMAIL` | Adresse d’envoi sur un domaine vérifié dans Resend |
+| `RESEND_FROM_NAME` | Nom affiché, par exemple `N’Teri` |
+| `NTERI_EMAIL_OTP_ALLOW_ENROLLMENT` | `False` en production |
+| `NTERI_SMS_BACKEND` | Optionnel : `twilio` ou `http` si `NTERI_OTP_CHANNEL=sms` |
 | `TWILIO_ACCOUNT_SID` | Identifiant Twilio si `NTERI_SMS_BACKEND=twilio` |
 | `TWILIO_AUTH_TOKEN` | Jeton Twilio si `NTERI_SMS_BACKEND=twilio` |
 | `TWILIO_FROM_NUMBER` | Numéro expéditeur Twilio au format international |
@@ -114,10 +120,20 @@ URL TLS `rediss://`.
 | `NTERI_VAPID_SUBJECT` | Contact VAPID, par exemple `mailto:contact@nteri.app` |
 | `NTERI_PUSH_ALLOWED_HOSTS` | Facultatif : suffixes Push autorisés, valeurs par défaut FCM/Mozilla/Apple/Windows |
 
-Sans passerelle SMS configurée, `NTERI_SMS_BACKEND=console` est refusé dès que
+Sans Resend configuré, `NTERI_EMAIL_BACKEND=console` est refusé dès que
 `DJANGO_DEBUG=False` : les demandes OTP renvoient `503` et la connexion est
-impossible. Ne déployez pas cette version en production avant d’avoir configuré
-Twilio ou la passerelle HTTP.
+impossible. Ne déployez pas cette version en production avant d’avoir vérifié
+le domaine d’envoi et défini `RESEND_API_KEY` et `RESEND_FROM_EMAIL`.
+
+Le téléphone reste l’identifiant unique. Un compte existant sans email ne peut
+pas se connecter tant qu’un administrateur ne lui en a pas associé un :
+
+```bash
+python manage.py set_user_email +22376123456 awa@exemple.com
+```
+
+Le flux email OTP ne vérifie pas la possession du numéro : il est temporaire,
+en attendant une passerelle SMS de production.
 
 Les alias stables `nteri.vercel.app` et
 `nteri-alassane-diallos-projects-6b5efa42.vercel.app` sont ajoutés
@@ -147,10 +163,13 @@ sert ensuite `/static/` (admin inclus) depuis l’application ASGI. Le service
 frontend exécute `npm run build`.
 
 > **Migrations de production** : le build applique automatiquement les
-> migrations `0003` à `0005` (OTP, contacts privés et Web Push). Sauvegardez la
-> base Supabase avant le premier déploiement de cette version. La migration
-> normalise les numéros de téléphone et remplit les carnets de contacts à
-> partir des conversations existantes.
+> migrations `0003` à `0006` (OTP, contacts privés, Web Push et email OTP).
+> Sauvegardez la base Supabase avant le premier déploiement de cette version.
+> La migration normalise les numéros de téléphone, remplit les carnets de
+> contacts à partir des conversations existantes et ajoute l’unicité des
+> emails. Les doublons d’email historiques éventuels sont vidés pour permettre
+> la contrainte ; l’email n’était pas utilisé pour l’authentification avant
+> cette version.
 
 Si Supabase est hébergé en `eu-west-3`, choisissez la région Vercel `cdg1`
 (Paris) dans **Settings → Functions → Region** pour limiter la latence.
@@ -159,7 +178,8 @@ Si Supabase est hébergé en `eu-west-3`, choisissez la région Vercel `cdg1`
 
 - `GET https://<domaine>/api/auth/csrf/` renvoie un JSON avec un jeton ;
 - `https://<domaine>/admin/` affiche la page de connexion avec son CSS ;
-- la demande OTP envoie un vrai SMS et la vérification ouvre une session ;
+- la demande OTP envoie un vrai email via Resend et la vérification ouvre une
+  session ;
 - `GET https://<domaine>/api/push/config/` indique si Web Push est activé ;
 - dans les outils développeur, `wss://<domaine>/ws/inbox/` répond `101` ;
 - deux navigateurs différents échangent des messages en temps réel.

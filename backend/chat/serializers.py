@@ -9,6 +9,7 @@ from rest_framework import serializers
 
 from .models import Contact, Conversation, Message, User
 from .validators import (
+    normalize_email,
     normalize_message_body,
     normalize_phone,
     normalize_single_line,
@@ -325,13 +326,26 @@ class PushUnsubscribeSerializer(serializers.Serializer):
 
 class OtpRequestSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=32)
+    email = serializers.EmailField(
+        max_length=254,
+        required=False,
+        allow_blank=True,
+    )
 
     def validate_phone(self, value: str) -> str:
         return normalize_phone(value)
 
+    def validate_email(self, value: str) -> str:
+        return normalize_email(value) if value else ""
+
 
 class OtpVerifySerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=32)
+    email = serializers.EmailField(
+        max_length=254,
+        required=False,
+        allow_blank=True,
+    )
     code = serializers.RegexField(
         regex=r"^\d{6}$",
         error_messages={
@@ -347,6 +361,9 @@ class OtpVerifySerializer(serializers.Serializer):
 
     def validate_phone(self, value: str) -> str:
         return normalize_phone(value)
+
+    def validate_email(self, value: str) -> str:
+        return normalize_email(value) if value else ""
 
     def validate_name(self, value: str) -> str:
         if not value.strip():

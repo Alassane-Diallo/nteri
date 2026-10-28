@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import timedelta
 from io import StringIO
 from unittest.mock import patch
@@ -14,7 +13,7 @@ from django.conf import settings
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.core.management import call_command
-from django.test import Client, TransactionTestCase, override_settings
+from django.test import Client, SimpleTestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
@@ -38,23 +37,37 @@ def make_user(
     first_name: str,
     last_name: str,
     phone: str,
+    email: str | None = None,
 ) -> User:
+    if email is None:
+        email = f"{username}@example.com"
+
     return User.objects.create_user(
         username=username,
         password=TEST_PASSWORD,
         first_name=first_name,
         last_name=last_name,
         phone=phone,
+        email=email,
     )
 
 
 @override_settings(
     PASSWORD_HASHERS=["django.contrib.auth.hashers.MD5PasswordHasher"],
+    OTP_CHANNEL="email",
+    OTP_EMAIL_BACKEND="console",
+    EMAIL_OTP_ALLOW_ENROLLMENT=True,
 )
 class AuthApiTests(APITestCase):
     def setUp(self):
         cache.clear()
-        self.user = make_user("awa", "Awa", "Traoré", "+22376123456")
+        self.user = make_user(
+            "awa",
+            "Awa",
+            "Traoré",
+            "+22376123456",
+            email="awa@example.com",
+        )
 
     def csrf_client(self) -> tuple[APIClient, str]:
         client = APIClient(enforce_csrf_checks=True)
@@ -64,36 +77,40 @@ class AuthApiTests(APITestCase):
 
         return client, response.data["csrfToken"]
 
-    def request_code(self, client, token: str, phone: str) -> str:
-        with patch("chat.otp.send_sms") as send_sms:
+    def request_code(
+        self,
+        client,
+        token: str,
+        phone: str,
+        email: str = "awa@example.com",
+    ) -> str:
+        with patch("chat.otp.send_otp_email") as send_email:
             response = client.post(
                 "/api/auth/otp/request/",
-                {"phone": phone},
+                {"phone": phone, "email": email},
                 format="json",
                 HTTP_X_CSRFTOKEN=token,
             )
         self.assertEqual(response.status_code, 200, response.data)
-        self.assertTrue(send_sms.called)
-        message = send_sms.call_args.args[1]
-        match = re.search(r"\b(\d{6})\b", message)
-        self.assertIsNotNone(match)
+        self.assertTrue(send_email.called)
+        self.assertEqual(send_email.call_args.args[0], email)
 
-        return match.group(1)
+        return send_email.call_args.args[1]
 
     def test_csrf_is_required_for_otp_request(self):
         client = APIClient(enforce_csrf_checks=True)
         denied = client.post(
             "/api/auth/otp/request/",
-            {"phone": "+22376123456"},
+            {"phone": "+22376123456", "email": "awa@example.com"},
             format="json",
         )
         self.assertEqual(denied.status_code, 403)
 
         token = client.get("/api/auth/csrf/").data["csrfToken"]
-        with patch("chat.otp.send_sms"):
+        with patch("chat.otp.send_otp_email"):
             allowed = client.post(
                 "/api/auth/otp/request/",
-                {"phone": "+22376123456"},
+                {"phone": "+22376123456", "email": "awa@example.com"},
                 format="json",
                 HTTP_X_CSRFTOKEN=token,
             )
@@ -105,7 +122,11 @@ class AuthApiTests(APITestCase):
 
         verified = client.post(
             "/api/auth/otp/verify/",
-            {"phone": "+22376123456", "code": code},
+            {
+                "phone": "+22376123456",
+                "email": "awa@example.com",
+                "code": code,
+            },
             format="json",
             HTTP_X_CSRFTOKEN=token,
         )
@@ -126,13 +147,145 @@ class AuthApiTests(APITestCase):
         )
         self.assertEqual(client.get("/api/auth/me/").status_code, 401)
 
+    def test_existing_user_cannot_use_another_email(self):
+        client, token = self.csrf_client()
+        with patch("chat.otp.send_otp_email") as send_email:
+            response = client.post(
+                "/api/auth/otp/request/",
+                {
+                    "phone": "+22376123456",
+                    "email": "attaquant@example.com",
+                },
+                format="json",
+                HTTP_X_CSRFTOKEN=token,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(send_email.called)
+        self.assertFalse(OtpChallenge.objects.exists())
+
+    @override_settings(EMAIL_OTP_ALLOW_ENROLLMENT=False)
+    def test_existing_user_without_email_requires_admin(self):
+        user = make_user(
+            "sans-email",
+            "Sans",
+            "Email",
+            "+22370000001",
+            email="",
+        )
+        client, token = self.csrf_client()
+        with patch("chat.otp.send_otp_email") as send_email:
+            response = client.post(
+                "/api/auth/otp/request/",
+                {
+                    "phone": user.phone,
+                    "email": "sans-email@example.com",
+                },
+                format="json",
+                HTTP_X_CSRFTOKEN=token,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(send_email.called)
+        self.assertFalse(OtpChallenge.objects.exists())
+
+    def test_enrollment_binds_email_after_code_verification(self):
+        user = make_user(
+            "sans-email",
+            "Sans",
+            "Email",
+            "+22370000002",
+            email="",
+        )
+        client, token = self.csrf_client()
+        code = self.request_code(
+            client,
+            token,
+            user.phone,
+            email="nouvelle-adresse@example.com",
+        )
+
+        response = client.post(
+            "/api/auth/otp/verify/",
+            {
+                "phone": user.phone,
+                "email": "nouvelle-adresse@example.com",
+                "code": code,
+            },
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        user.refresh_from_db()
+        self.assertEqual(user.email, "nouvelle-adresse@example.com")
+
+    def test_new_account_rejects_an_email_already_used(self):
+        client, token = self.csrf_client()
+        with patch("chat.otp.send_otp_email") as send_email:
+            response = client.post(
+                "/api/auth/otp/request/",
+                {
+                    "phone": "+22370000003",
+                    "email": "awa@example.com",
+                },
+                format="json",
+                HTTP_X_CSRFTOKEN=token,
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.data)
+        self.assertFalse(send_email.called)
+
+    def test_missing_email_is_rejected(self):
+        client, token = self.csrf_client()
+        response = client.post(
+            "/api/auth/otp/request/",
+            {"phone": "+22376123456"},
+            format="json",
+            HTTP_X_CSRFTOKEN=token,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.data)
+
+    def test_email_delivery_failure_returns_503(self):
+        from .email import EmailDeliveryError
+
+        client, token = self.csrf_client()
+        with patch(
+            "chat.otp.send_otp_email",
+            side_effect=EmailDeliveryError("indisponible"),
+        ):
+            response = client.post(
+                "/api/auth/otp/request/",
+                {
+                    "phone": "+22376123456",
+                    "email": "awa@example.com",
+                },
+                format="json",
+                HTTP_X_CSRFTOKEN=token,
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(OtpChallenge.objects.exists())
+
     def test_unknown_phone_creates_account_after_name(self):
         client, token = self.csrf_client()
-        code = self.request_code(client, token, "+22375086321")
+        code = self.request_code(
+            client,
+            token,
+            "+22375086321",
+            email="fatoumata@example.com",
+        )
 
         needs_name = client.post(
             "/api/auth/otp/verify/",
-            {"phone": "+22375086321", "code": code},
+            {
+                "phone": "+22375086321",
+                "email": "fatoumata@example.com",
+                "code": code,
+            },
             format="json",
             HTTP_X_CSRFTOKEN=token,
         )
@@ -143,6 +296,7 @@ class AuthApiTests(APITestCase):
             "/api/auth/otp/verify/",
             {
                 "phone": "+22375086321",
+                "email": "fatoumata@example.com",
                 "code": code,
                 "name": "Fatoumata Keïta",
             },
@@ -155,6 +309,7 @@ class AuthApiTests(APITestCase):
 
         user = User.objects.get(phone="+22375086321")
         self.assertTrue(user.username.startswith("nteri_"))
+        self.assertEqual(user.email, "fatoumata@example.com")
         self.assertFalse(user.has_usable_password())
 
     def test_wrong_code_is_rejected_and_limited(self):
@@ -165,7 +320,11 @@ class AuthApiTests(APITestCase):
         for _ in range(5):
             response = client.post(
                 "/api/auth/otp/verify/",
-                {"phone": "+22376123456", "code": wrong_code},
+                {
+                    "phone": "+22376123456",
+                    "email": "awa@example.com",
+                    "code": wrong_code,
+                },
                 format="json",
                 HTTP_X_CSRFTOKEN=token,
             )
@@ -173,7 +332,11 @@ class AuthApiTests(APITestCase):
 
         valid_after_limit = client.post(
             "/api/auth/otp/verify/",
-            {"phone": "+22376123456", "code": code},
+            {
+                "phone": "+22376123456",
+                "email": "awa@example.com",
+                "code": code,
+            },
             format="json",
             HTTP_X_CSRFTOKEN=token,
         )
@@ -187,7 +350,11 @@ class AuthApiTests(APITestCase):
 
         response = client.post(
             "/api/auth/otp/verify/",
-            {"phone": "+22376123456", "code": code},
+            {
+                "phone": "+22376123456",
+                "email": "awa@example.com",
+                "code": code,
+            },
             format="json",
             HTTP_X_CSRFTOKEN=token,
         )
@@ -196,12 +363,15 @@ class AuthApiTests(APITestCase):
     def test_otp_requests_are_rate_limited(self):
         client, token = self.csrf_client()
         statuses = []
-        with patch("chat.otp.send_sms"):
+        with patch("chat.otp.send_otp_email"):
             for _ in range(4):
                 statuses.append(
                     client.post(
                         "/api/auth/otp/request/",
-                        {"phone": "+22376123456"},
+                        {
+                            "phone": "+22376123456",
+                            "email": "awa@example.com",
+                        },
                         format="json",
                         HTTP_X_CSRFTOKEN=token,
                     ).status_code
@@ -772,3 +942,36 @@ class InboxConsumerTests(TransactionTestCase):
             await other.disconnect()
 
         async_to_sync(scenario)()
+
+
+@override_settings(
+    OTP_EMAIL_BACKEND="resend",
+    RESEND_API_KEY="re_test_key",
+    RESEND_FROM_EMAIL="connexion@example.com",
+    RESEND_FROM_NAME="N’Teri",
+    RESEND_API_URL="https://api.resend.test/emails",
+)
+class EmailDeliveryTests(SimpleTestCase):
+    def test_resend_payload_contains_the_code(self):
+        from .email import send_otp_email
+
+        with patch("chat.email.requests.post") as post:
+            post.return_value.status_code = 200
+            send_otp_email("awa@example.com", "123456", ttl_seconds=300)
+
+        self.assertTrue(post.called)
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["to"], ["awa@example.com"])
+        self.assertIn("123456", payload["text"])
+        self.assertIn("123456", payload["html"])
+        self.assertEqual(
+            post.call_args.kwargs["headers"]["Authorization"],
+            "Bearer re_test_key",
+        )
+
+    @override_settings(OTP_EMAIL_BACKEND="console", DEBUG=False)
+    def test_console_email_is_refused_in_production(self):
+        from .email import EmailDeliveryError, send_otp_email
+
+        with self.assertRaises(EmailDeliveryError):
+            send_otp_email("awa@example.com", "123456")

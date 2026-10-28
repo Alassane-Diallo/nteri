@@ -7,6 +7,7 @@ import {
   KeyIcon,
   LoaderIcon,
   LockIcon,
+  MailIcon,
   PhoneIcon,
   UsersIcon,
 } from "~/components/icons";
@@ -16,14 +17,16 @@ import type {
   OtpVerifyPayload,
 } from "../messaging/api";
 
-type Step = "phone" | "code";
+type Step = "phone" | "email" | "code";
 type VerifyResult = "authenticated" | "requires-name" | "error";
 
 interface AuthScreenProps {
   busy: boolean;
   error: string | null;
-  needsName: boolean;
-  onRequestOtp: (phone: string) => Promise<OtpRequestResponse | null>;
+  onRequestOtp: (
+    phone: string,
+    email: string,
+  ) => Promise<OtpRequestResponse | null>;
   onVerifyOtp: (payload: OtpVerifyPayload) => Promise<VerifyResult>;
 }
 
@@ -38,18 +41,23 @@ function validPhone(value: string): boolean {
   return digits.length >= 8 && digits.length <= 15;
 }
 
+function validEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 export function AuthScreen({
   busy,
   error,
-  needsName,
   onRequestOtp,
   onVerifyOtp,
 }: AuthScreenProps) {
   const [step, setStep] = useState<Step>("phone");
   const [localError, setLocalError] = useState<string | null>(null);
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
+  const [needsName, setNeedsName] = useState(false);
   const [devCode, setDevCode] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
 
@@ -66,28 +74,53 @@ export function AuthScreen({
     return () => window.clearTimeout(timer);
   }, [secondsLeft, step]);
 
-  const requestCode = async (): Promise<void> => {
+  const sendCode = async (): Promise<boolean> => {
+    setLocalError(null);
+    if (!validPhone(phone)) {
+      setStep("phone");
+      setLocalError("Indiquez un numéro de téléphone valide.");
+      return false;
+    }
+    if (!validEmail(email)) {
+      setStep("email");
+      setLocalError("Indiquez une adresse email valide.");
+      return false;
+    }
+
+    const response = await onRequestOtp(
+      phone.trim(),
+      email.trim().toLowerCase(),
+    );
+    if (!response) {
+      return false;
+    }
+
+    setStep("code");
+    setCode("");
+    setDevCode(response.devCode ?? null);
+    setSecondsLeft(response.expiresIn);
+
+    return true;
+  };
+
+  const handlePhoneSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setLocalError(null);
     if (!validPhone(phone)) {
       setLocalError("Indiquez un numéro de téléphone valide.");
       return;
     }
 
-    const response = await onRequestOtp(phone.trim());
-    if (!response) {
-      return;
-    }
-
-    setStep("code");
     setCode("");
+    setDevCode(null);
+    setNeedsName(false);
     setName("");
-    setDevCode(response.devCode ?? null);
-    setSecondsLeft(response.expiresIn);
+    setStep("email");
   };
 
-  const handlePhoneSubmit = async (event: FormEvent<HTMLFormElement>) => {
+  const handleEmailSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await requestCode();
+    await sendCode();
   };
 
   const handleCodeSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -103,17 +136,50 @@ export function AuthScreen({
       return;
     }
 
-    await onVerifyOtp({
+    const result = await onVerifyOtp({
       phone: phone.trim(),
+      email: email.trim().toLowerCase(),
       code,
       ...(name.trim() ? { name: name.trim() } : {}),
     });
+
+    if (result === "requires-name") {
+      setNeedsName(true);
+    }
   };
 
   const displayedError = localError ?? error;
   const expired = step === "code" && secondsLeft === 0;
   const minutes = Math.floor(secondsLeft / 60);
   const seconds = String(secondsLeft % 60).padStart(2, "0");
+  const stepIndex = step === "phone" ? 0 : step === "email" ? 1 : 2;
+
+  const stepCircleClass = (index: number): string =>
+    cn(
+      "grid size-7 place-items-center rounded-full text-[11px] font-bold",
+      stepIndex === index
+        ? "bg-brand text-surface"
+        : stepIndex > index
+          ? "bg-brand-soft text-brand"
+          : "bg-surface-muted text-muted",
+    );
+
+  const stepLineClass = (index: number): string =>
+    cn("h-px flex-1", stepIndex > index ? "bg-brand/40" : "bg-line");
+
+  const heading =
+    step === "phone"
+      ? "Connexion par téléphone"
+      : step === "email"
+        ? "Vérification par email"
+        : "Vérifiez votre email";
+
+  const description =
+    step === "phone"
+      ? "Entrez votre numéro. Nous vous demanderons ensuite votre adresse email pour envoyer le code."
+      : step === "email"
+        ? "Indiquez l’adresse email qui recevra votre code de connexion à usage unique."
+        : `Saisissez le code envoyé à ${email.trim()}.`;
 
   return (
     <main className="page-pattern grid min-h-dvh place-items-center px-4 py-8 text-ink sm:px-6">
@@ -154,7 +220,7 @@ export function AuthScreen({
                 <span className="grid size-8 place-items-center rounded-full bg-canvas/10">
                   <PhoneIcon className="size-4" />
                 </span>
-                Connexion par téléphone et code SMS
+                Connexion par téléphone et code email
               </li>
               <li className="flex items-center gap-3">
                 <span className="grid size-8 place-items-center rounded-full bg-canvas/10">
@@ -196,33 +262,23 @@ export function AuthScreen({
           </div>
 
           <div className="flex items-center gap-2">
-            <span
-              className={cn(
-                "grid size-7 place-items-center rounded-full text-[11px] font-bold",
-                step === "phone"
-                  ? "bg-brand text-surface"
-                  : "bg-brand-soft text-brand",
-              )}
-            >
-              {step === "phone" ? "1" : <CheckIcon className="size-3.5" />}
-            </span>
-            <span
-              className={cn(
-                "h-px flex-1",
-                step === "code" ? "bg-brand/40" : "bg-line",
-              )}
-              aria-hidden="true"
-            />
-            <span
-              className={cn(
-                "grid size-7 place-items-center rounded-full text-[11px] font-bold",
-                step === "code"
-                  ? "bg-brand text-surface"
-                  : "bg-surface-muted text-muted",
-              )}
-            >
-              2
-            </span>
+            {[0, 1, 2].map((index) => (
+              <div key={index} className="contents">
+                <span className={stepCircleClass(index)}>
+                  {stepIndex > index ? (
+                    <CheckIcon className="size-3.5" />
+                  ) : (
+                    index + 1
+                  )}
+                </span>
+                {index < 2 && (
+                  <span
+                    className={stepLineClass(index)}
+                    aria-hidden="true"
+                  />
+                )}
+              </div>
+            ))}
           </div>
 
           <div className="mt-7">
@@ -230,14 +286,10 @@ export function AuthScreen({
               N’Teri · Accès
             </p>
             <h2 className="mt-1 font-display text-[25px] font-semibold tracking-[-0.04em] text-ink">
-              {step === "phone"
-                ? "Connexion par téléphone"
-                : "Vérifiez votre numéro"}
+              {heading}
             </h2>
             <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted">
-              {step === "phone"
-                ? "Entrez votre numéro. Nous vous envoyons un code à usage unique par SMS."
-                : `Saisissez le code envoyé au ${phone.trim()}.`}
+              {description}
             </p>
           </div>
 
@@ -250,7 +302,7 @@ export function AuthScreen({
             </div>
           )}
 
-          {step === "phone" ? (
+          {step === "phone" && (
             <form className="mt-5 space-y-4" onSubmit={handlePhoneSubmit} noValidate>
               <div>
                 <label htmlFor="login-phone" className={labelClass}>
@@ -269,7 +321,60 @@ export function AuthScreen({
                   autoFocus
                 />
                 <p className="mt-1.5 text-[10px] leading-relaxed text-muted">
-                  Utilisez le numéro associé à votre compte N’Teri.
+                  Votre numéro reste votre identifiant N’Teri. Le code de
+                  connexion sera envoyé par email.
+                </p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={busy}
+                className="button-brand mt-2 inline-flex h-11 w-full items-center justify-center gap-2 rounded-full px-5 text-[12.5px] font-semibold shadow-sm transition duration-200 hover:brightness-110 active:scale-[0.99] disabled:bg-line disabled:bg-none disabled:text-muted disabled:shadow-none"
+              >
+                <PhoneIcon className="size-4" />
+                Continuer
+              </button>
+            </form>
+          )}
+
+          {step === "email" && (
+            <form className="mt-5 space-y-4" onSubmit={handleEmailSubmit} noValidate>
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <label htmlFor="login-email" className={labelClass}>
+                    Adresse email
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep("phone");
+                      setEmail("");
+                      setName("");
+                      setNeedsName(false);
+                      setCode("");
+                      setDevCode(null);
+                      setLocalError(null);
+                    }}
+                    className="text-[10.5px] font-semibold text-brand transition hover:text-brand-deep hover:underline"
+                  >
+                    Modifier le numéro
+                  </button>
+                </div>
+                <input
+                  id="login-email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  inputMode="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="awa@exemple.com"
+                  className={fieldClass}
+                  autoFocus
+                />
+                <p className="mt-1.5 text-[10px] leading-relaxed text-muted">
+                  Utilisez l’adresse email associée à votre compte. Le code à 6
+                  chiffres y sera envoyé.
                 </p>
               </div>
 
@@ -281,12 +386,14 @@ export function AuthScreen({
                 {busy ? (
                   <LoaderIcon className="size-4 animate-spin" />
                 ) : (
-                  <PhoneIcon className="size-4" />
+                  <MailIcon className="size-4" />
                 )}
                 {busy ? "Envoi…" : "Recevoir mon code"}
               </button>
             </form>
-          ) : (
+          )}
+
+          {step === "code" && (
             <form className="mt-5 space-y-4" onSubmit={handleCodeSubmit} noValidate>
               <div>
                 <div className="flex items-center justify-between gap-3">
@@ -296,14 +403,14 @@ export function AuthScreen({
                   <button
                     type="button"
                     onClick={() => {
-                      setStep("phone");
+                      setStep("email");
                       setCode("");
-                      setName("");
+                      setDevCode(null);
                       setLocalError(null);
                     }}
                     className="text-[10.5px] font-semibold text-brand transition hover:text-brand-deep hover:underline"
                   >
-                    Modifier le numéro
+                    Modifier l’email
                   </button>
                 </div>
                 <input
@@ -328,6 +435,10 @@ export function AuthScreen({
                     ? "Le code a expiré. Demandez-en un nouveau."
                     : `Code valable encore ${minutes}:${seconds}.`}
                 </p>
+                <p className="mt-1 text-[10px] leading-relaxed text-muted">
+                  Aucun email ? Vérifiez que l’adresse saisie est bien celle
+                  associée à votre compte.
+                </p>
               </div>
 
               {needsName && (
@@ -344,7 +455,6 @@ export function AuthScreen({
                     onChange={(event) => setName(event.target.value)}
                     placeholder="Ex. Awa Traoré"
                     className={fieldClass}
-                    autoFocus
                   />
                   <p className="mt-1.5 text-[10px] leading-relaxed text-muted">
                     Ce numéro n’a pas encore de compte. Votre nom servira à
@@ -363,7 +473,7 @@ export function AuthScreen({
               <div className="flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
-                  onClick={() => void requestCode()}
+                  onClick={() => void sendCode()}
                   disabled={busy}
                   className="inline-flex h-11 flex-1 items-center justify-center rounded-full border border-line bg-surface px-4 text-[12px] font-semibold text-ink-soft transition hover:bg-surface-muted hover:text-ink disabled:text-muted"
                 >
@@ -391,7 +501,8 @@ export function AuthScreen({
             <p className="mt-4 rounded-2xl bg-surface-muted px-3.5 py-2.5 text-[10.5px] leading-relaxed text-muted">
               Démo :{" "}
               <span className="font-semibold text-ink">+223 76 12 34 56</span>.
-              Le code s’affiche après la demande en mode développement.
+              En développement, utilisez l’adresse email de votre choix ; le
+              code s’affiche après la demande.
             </p>
           )}
         </section>

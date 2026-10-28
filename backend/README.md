@@ -1,8 +1,8 @@
 # API N’Teri
 
 Backend Django 6.1 de la messagerie N’Teri : authentification par numéro de
-téléphone et code OTP, carnet de contacts privé, API REST et flux temps réel
-WebSocket.
+téléphone et code OTP envoyé par email, carnet de contacts privé, API REST et
+flux temps réel WebSocket.
 
 ## Démarrage local
 
@@ -10,7 +10,7 @@ Prérequis : Python 3.12+, un environnement virtuel et, pour le temps réel,
 Redis en production (le développement peut utiliser le canal en mémoire).
 
 ```bash
-cd backend
+cd nteri-api
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -24,14 +24,19 @@ python manage.py seed_demo
 python manage.py runserver 127.0.0.1:8000
 ```
 
-Le frontend React Router se trouve dans `../frontend`. Son proxy Vite envoie
+Le frontend React Router se trouve dans `../nteri`. Son proxy Vite envoie
 `/api` et `/ws` vers `http://127.0.0.1:8000` ; les cookies de session et la
 protection CSRF restent ainsi sur la même origine.
 
-En développement, `NTERI_SMS_BACKEND=console` affiche le code dans les logs
-Django. Si `NTERI_EXPOSE_OTP=True` (valeur par défaut en DEBUG), l’API renvoie
-aussi `devCode` pour faciliter les tests. Ces deux comportements sont refusés
-hors DEBUG.
+En développement, `NTERI_EMAIL_BACKEND=console` (valeur par défaut en DEBUG)
+affiche le code dans les logs Django. Si `NTERI_EXPOSE_OTP=True` (valeur par
+défaut en DEBUG), l’API renvoie aussi `devCode` pour faciliter les tests. Ces
+deux comportements sont refusés hors DEBUG.
+
+Le canal OTP par défaut est l’email (`NTERI_OTP_CHANNEL=email`). Le téléphone
+reste l’identifiant unique du compte ; l’email sert uniquement à recevoir le
+code. Le canal SMS reste disponible avec `NTERI_OTP_CHANNEL=sms` lorsqu’une
+passerelle réelle est configurée.
 
 ## Comptes de démonstration
 
@@ -43,10 +48,19 @@ hors DEBUG.
 | Moussa Diarra | `+22370451289` |
 | Fatoumata Keïta | `+22375086321` |
 
-La connexion se fait avec le numéro et le code OTP. Les comptes conservent
-aussi un mot de passe Django (`NteriDemo2026!` par défaut) utilisable
-uniquement pour l’administration ; l’interface N’Teri ne le demande plus. Le
-mot de passe de démonstration peut être remplacé avec
+La connexion se fait avec le numéro, puis une adresse email qui reçoit le
+code OTP. En développement, `NTERI_EMAIL_OTP_ALLOW_ENROLLMENT=True` permet
+d’associer une adresse email à un compte de démonstration lors de sa première
+connexion. En production, cette option doit rester désactivée et un
+administrateur renseigne l’email avec :
+
+```bash
+python manage.py set_user_email +22376123456 awa@exemple.com
+```
+
+Les comptes conservent aussi un mot de passe Django (`NteriDemo2026!` par
+défaut) utilisable uniquement pour l’administration ; l’interface N’Teri ne le
+demande plus. Le mot de passe de démonstration peut être remplacé avec
 `NTERI_DEMO_PASSWORD`.
 
 La commande refuse de s’exécuter quand `DJANGO_DEBUG=False`, sauf avec
@@ -68,7 +82,7 @@ Toutes les réponses sont en JSON. Les cookies de session sont `HttpOnly`,
 | --- | --- | --- |
 | `GET` | `/api/health/` | Sonde de disponibilité |
 | `GET` | `/api/auth/csrf/` | Dépose le cookie CSRF et renvoie le jeton |
-| `POST` | `/api/auth/otp/request/` | Envoie un code de connexion par SMS |
+| `POST` | `/api/auth/otp/request/` | Envoie un code de connexion par email (ou SMS si configuré) |
 | `POST` | `/api/auth/otp/verify/` | Vérifie le code et ouvre une session |
 | `POST` | `/api/auth/logout/` | Ferme la session, les WebSockets et les abonnements Push |
 | `GET` | `/api/auth/me/` | Profil de l’utilisateur connecté |
@@ -106,19 +120,56 @@ expéditeur qu’elle n’a pas encore enregistré, comme dans WhatsApp.
 
 ## Authentification OTP
 
-- Les numéros sont normalisés au format international. Un numéro malien à
-  8 chiffres devient automatiquement `+223…`.
+- Le téléphone est l’identifiant unique du compte. Les numéros sont normalisés
+  au format international : un numéro malien à 8 chiffres devient
+  automatiquement `+223…`.
+- Le client envoie le numéro puis l’adresse email. Le code est envoyé à
+  l’email par Resend en production, ou affiché dans les logs avec le backend
+  `console` en développement.
 - Le code contient 6 chiffres, expire après 5 minutes et accepte au maximum
   5 essais.
-- Les demandes sont limitées à 3 par 10 minutes par numéro et par IP ; les
-  vérifications échouées sont également limitées.
+- Les demandes sont limitées à 3 par 10 minutes par numéro, par email et par
+  IP ; les vérifications échouées sont également limitées.
 - Les codes sont stockés hachés et ne sont jamais renvoyés en production.
 - Un nouveau numéro crée un compte après vérification du code. Le nom complet
   peut être demandé dans un second temps.
+- Un compte existant ne peut recevoir un code qu’à l’adresse email déjà
+  associée. Une adresse différente ne déclenche aucun envoi, pour empêcher la
+  reprise d’un compte avec un simple numéro.
+- Un compte existant sans email ne peut pas se connecter tant qu’un
+  administrateur ne lui en a pas associé un. En développement uniquement,
+  `NTERI_EMAIL_OTP_ALLOW_ENROLLMENT=True` autorise cette association après
+  vérification du code.
 
-`SMS_BACKEND` accepte `console` (développement uniquement), `twilio` ou `http`
-(passerelle générique). Sans passerelle configurée hors DEBUG, la demande OTP
-renvoie `503` : aucun code ne doit apparaître dans les journaux de production.
+### Email OTP avec Resend
+
+En production, définir :
+
+```bash
+NTERI_OTP_CHANNEL=email
+NTERI_EMAIL_BACKEND=resend
+RESEND_API_KEY=re_...
+RESEND_FROM_EMAIL=connexion@votre-domaine.example
+RESEND_FROM_NAME=N’Teri
+NTERI_EMAIL_OTP_ALLOW_ENROLLMENT=False
+```
+
+Le domaine de `RESEND_FROM_EMAIL` doit être vérifié dans Resend. La clé API et
+l’adresse d’envoi restent côté serveur. `console` est refusé hors DEBUG et la
+demande OTP renvoie `503` si Resend n’est pas configuré : aucun code ne doit
+apparaître dans les journaux de production.
+
+> **Limite temporaire** : ce flux vérifie l’adresse email, pas la possession du
+> numéro de téléphone. Il est destiné à tester N’Teri avant la mise en place
+> d’une passerelle SMS de production. Ne pas ouvrir publiquement les
+> inscriptions tant que la vérification du numéro n’est pas rétablie.
+
+### SMS (optionnel)
+
+`NTERI_OTP_CHANNEL=sms` réactive le canal SMS. `NTERI_SMS_BACKEND` accepte
+`console` (développement uniquement), `twilio` ou `http` (passerelle
+générique). Sans passerelle configurée hors DEBUG, la demande OTP renvoie
+`503`.
 
 ## WebSocket
 
@@ -197,8 +248,12 @@ service de Push.
 - Les messages, noms, téléphones et noms de groupe sont normalisés, limités en
   taille et débarrassés des caractères de contrôle.
 - Les demandes de code et les vérifications sont limitées en base
-  (`AuthAttempt`) par IP et par numéro, avec un blocage temporaire. Les codes
-  OTP sont hachés et à usage unique.
+  (`AuthAttempt`) par IP, par numéro et par email, avec un blocage temporaire.
+  Les codes OTP sont hachés et à usage unique.
+- Les emails sont normalisés et uniques sans tenir compte de la casse. Un
+  compte existant ne peut pas changer d’email via la connexion anonyme.
+- Le flux email OTP ne prouve pas la possession du numéro. Il reste un mode
+  transitoire tant qu’une passerelle SMS de production n’est pas disponible.
 - L’API n’accepte que du JSON, limite la taille des requêtes et ne gère aucun
   fichier. Les réponses API sont marquées `no-store` et protégées par une CSP
   restrictive.
@@ -234,8 +289,11 @@ messages, les notifications Push et les WebSockets.
 2. Définir `DJANGO_DEBUG=False`, une `DJANGO_SECRET_KEY` unique, les hôtes et
    origines réels, puis `DJANGO_TRUST_PROXY_HEADERS=True` uniquement derrière
    un reverse proxy de confiance qui transmet `X-Forwarded-Proto`.
-3. Configurer une passerelle SMS réelle (`NTERI_SMS_BACKEND=twilio` ou `http`)
-   avec ses identifiants. Le backend `console` est refusé hors DEBUG.
+3. Configurer Resend (`NTERI_EMAIL_BACKEND=resend`, `RESEND_API_KEY`,
+   `RESEND_FROM_EMAIL`) avec un domaine vérifié, et laisser
+   `NTERI_EMAIL_OTP_ALLOW_ENROLLMENT=False`. Une passerelle SMS réelle
+   (`NTERI_SMS_BACKEND=twilio` ou `http`) peut être configurée en parallèle
+   pour rétablir la vérification du numéro.
 4. Générer des clés VAPID propres à l’environnement et définir
    `NTERI_VAPID_PUBLIC_KEY`, `NTERI_VAPID_PRIVATE_KEY` et
    `NTERI_VAPID_SUBJECT`. Servir le frontend en HTTPS pour autoriser
